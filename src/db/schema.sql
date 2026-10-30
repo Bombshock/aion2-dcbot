@@ -2,7 +2,7 @@ CREATE TABLE IF NOT EXISTS guild_settings (
   guild_id          TEXT PRIMARY KEY,
   events_channel_id TEXT,
   groups_channel_id TEXT,
-  timezone          TEXT NOT NULL DEFAULT 'UTC',
+  timezone          TEXT NOT NULL DEFAULT 'Europe/Berlin',
   organizer_role_id TEXT
 );
 

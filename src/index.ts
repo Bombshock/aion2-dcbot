@@ -14,6 +14,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
   try {
     if (interaction.isChatInputCommand()) {
       await commandMap.get(interaction.commandName)?.execute(interaction);
+    } else if (interaction.isAutocomplete()) {
+      await commandMap.get(interaction.commandName)?.autocomplete?.(interaction);
     } else if (interaction.isMessageComponent() || interaction.isModalSubmit()) {
       await routeInteraction(interaction);
     }
