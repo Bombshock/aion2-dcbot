@@ -53,7 +53,10 @@
       "Bash(cd:*)",
       "PowerShell(node:*)",
       "Bash(git:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(cat:*)",
+      "Bash(python:*)",
+      "Bash(sed:*)"
     ]
   }
 }
