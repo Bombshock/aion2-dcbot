@@ -29,3 +29,14 @@ SQLite storage for everything the bot needs to survive restarts. Depends on *pro
 
 - `npm test`: repository tests create, read, update and delete each entity; the unique constraints reject a
   second signup by the same user and a double-booked slot.
+
+## Summary
+
+- Added `src/db/schema.sql` (all six tables, idempotent `CREATE ... IF NOT EXISTS`, CHECK constraints on statuses, cascade deletes for signups/members, `ON DELETE SET NULL` for a group's template) and `src/db/schema.ts` (`applySchema(db)`, to be called after `openDb`).
+- Added repositories returning plain objects: `guildSettings.ts`, `events.ts` (events + signups), `groups.ts` (group templates, groups + members). Constraint violations (second signup, double-booked slot) surface as thrown SQLite errors.
+- `npm run build` now also copies `schema.sql` into `dist/db` via `scripts/copy-schema.mjs`, since `tsc` doesn't copy it. No new dependencies.
+- Tests: `src/db/repositories.test.ts` (in-memory DB) covers CRUD per entity and the unique constraints.
+
+Verify: `npx tsc --noEmit` is clean and `npx vitest run src/db` passes (12 tests).
+
+Follow-up: `npm run test` was run after all (15 tests in 2 files pass) and `npm run build` succeeds, with `schema.sql` copied to `dist/db`.

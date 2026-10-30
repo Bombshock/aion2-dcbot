@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-/** Opens the SQLite database. Schema and repositories are added by the database ticket. */
+/** Opens the SQLite database. Call `applySchema` (schema.ts) afterwards. */
 export function openDb(path: string): Database.Database {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
   const db = new Database(path);
