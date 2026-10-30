@@ -1,0 +1,59 @@
+{
+  "tags": [
+    {
+      "name": "infra"
+    },
+    {
+      "name": "classes"
+    },
+    {
+      "name": "setup"
+    },
+    {
+      "name": "events"
+    },
+    {
+      "name": "groups"
+    }
+  ],
+  "claude": {
+    "allowedTools": [
+      "Bash(npm test:*)",
+      "Bash(npm run:*)",
+      "Bash(npx vitest:*)",
+      "Bash(npx ng:*)",
+      "Bash(npx tsc:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git add:*)",
+      "Bash(git mv:*)",
+      "Bash(git rm:*)",
+      "Bash(git commit:*)",
+      "Bash(mv:*)",
+      "Bash(mkdir:*)",
+      "Bash(ls:*)",
+      "PowerShell(npm test:*)",
+      "PowerShell(npm run:*)",
+      "PowerShell(npx vitest:*)",
+      "PowerShell(npx ng:*)",
+      "PowerShell(npx tsc:*)",
+      "PowerShell(git status:*)",
+      "PowerShell(git diff:*)",
+      "PowerShell(git log:*)",
+      "PowerShell(git show:*)",
+      "PowerShell(git add:*)",
+      "PowerShell(git mv:*)",
+      "PowerShell(git rm:*)",
+      "PowerShell(git commit:*)",
+      "PowerShell(Move-Item:*)",
+      "PowerShell(New-Item:*)",
+      "PowerShell(Get-ChildItem:*)",
+      "Bash(cd:*)",
+      "PowerShell(node:*)",
+      "Bash(git:*)",
+      "Bash(npm install:*)"
+    ]
+  }
+}
