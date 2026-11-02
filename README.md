@@ -43,12 +43,9 @@ This list is generated from the ticket board in [`tickets/`](tickets) by `npm ru
 - [x] Admin setup command
 - [x] Create events
 
-### In progress
-
-- [ ] Event sign up with class selection
-
 ### Planned
 
+- [ ] Event sign up with class selection
 - [ ] Manage events edit and cancel
 - [ ] Group templates
 - [ ] Create group search posts
