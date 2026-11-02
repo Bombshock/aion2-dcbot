@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { CLASSES } from './classes.js';
-import { buildEventEmbed, EMPTY_ROSTER_TEXT, formatRoster } from './eventMessage.js';
+import { buildEventEmbed, EMPTY_ROSTER_TEXT, formatFullRoster, isRosterCompact } from './eventMessage.js';
 
 const event = { id: 1, creatorId: '99', title: 'Raid', description: 'Bring pots', startsAt: 1900000000, status: 'open' as const };
+
+const make = (n: number) =>
+  Array.from({ length: n }, (_, i) => ({ userId: String(100000000000000000n + BigInt(i)), classId: CLASSES[i % CLASSES.length]!.id }));
+const embedSize = (e: ReturnType<typeof buildEventEmbed>) =>
+  e.title.length + e.description.length + e.fields.reduce((n, f) => n + f.name.length + f.value.length, 0);
 
 describe('buildEventEmbed', () => {
   it('shows title, description, timestamps, organizer and an empty roster', () => {
@@ -15,23 +20,44 @@ describe('buildEventEmbed', () => {
     expect(text).toContain('<@99>');
     expect(text).toContain(EMPTY_ROSTER_TEXT);
   });
-  it('lists sign-ups with their class', () => {
-    const e = buildEventEmbed(event, [{ userId: '5', classId: CLASSES[0]!.id }]);
-    const roster = e.fields.find((f) => f.name.startsWith('Roster'))!;
-    expect(roster.name).toBe('Roster (1)');
-    expect(roster.value).toContain('<@5>');
-    expect(roster.value).toContain(CLASSES[0]!.name);
+  it('groups sign-ups by role then class with counts', () => {
+    const e = buildEventEmbed(event, [
+      { userId: '1', classId: 'templar' },
+      { userId: '2', classId: 'gladiator' },
+      { userId: '3', classId: 'cleric' },
+    ]);
+    expect(e.fields.map((f) => f.name)).toEqual(['When', 'Organizer', 'Tanks (2)', 'Healers (1)', 'Total']);
+    expect(e.fields.find((f) => f.name === 'Tanks (2)')!.value).toBe('⚔️ <@2> (Gladiator) · 🛡️ <@1> (Templar)');
+    expect(e.fields.find((f) => f.name === 'Total')!.value).toBe('3');
   });
   it('marks cancelled events', () => {
     expect(buildEventEmbed({ ...event, status: 'cancelled' }, []).title).toBe('[Cancelled] Raid');
   });
 });
 
-describe('formatRoster', () => {
-  it('stays within the embed field limit for large rosters', () => {
-    const many = Array.from({ length: 200 }, (_, i) => ({ userId: String(1e17 + i), classId: CLASSES[0]!.id }));
-    const out = formatRoster(many);
-    expect(out.length).toBeLessThanOrEqual(1024);
-    expect(out).toMatch(/more$/);
+describe('roster size handling', () => {
+  it('renders 0 sign-ups as empty', () => {
+    expect(isRosterCompact(event, [])).toBe(false);
+    expect(buildEventEmbed(event, []).fields.at(-1)!.value).toBe(EMPTY_ROSTER_TEXT);
+  });
+  it('lists names for 5 sign-ups', () => {
+    const signups = make(5);
+    expect(isRosterCompact(event, signups)).toBe(false);
+    expect(buildEventEmbed(event, signups).fields.map((f) => f.value).join('\n')).toContain('<@' + signups[0]!.userId + '>');
+  });
+  it('switches to counts per class for 300 sign-ups and stays within embed limits', () => {
+    const signups = make(300);
+    expect(isRosterCompact(event, signups)).toBe(true);
+    const e = buildEventEmbed({ ...event, description: 'x'.repeat(2000) }, signups);
+    expect(e.fields.every((f) => f.value.length <= 1024)).toBe(true);
+    expect(embedSize(e)).toBeLessThanOrEqual(6000);
+    expect(e.fields.find((f) => f.name === 'Total')!.value).toBe('300');
+    expect(e.fields.find((f) => f.name.startsWith('Tanks'))!.value).toContain('×');
+  });
+  it('splits the full roster into messages of at most 2000 characters', () => {
+    const chunks = formatFullRoster(make(300));
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every((c) => c.length <= 2000)).toBe(true);
+    expect(chunks.join('\n')).toContain('Total: 300');
   });
 });

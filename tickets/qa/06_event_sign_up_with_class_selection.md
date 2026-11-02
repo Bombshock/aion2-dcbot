@@ -37,3 +37,12 @@ Depends on *create events* and *class catalog and class picker*.
 
 - Sign up, switch class, leave: the post updates each time.
 - Unit test for the roster renderer with 0, 5 and 300 sign-ups (the last one stays within embed limits).
+
+## Summary
+
+- `src/interactions/eventSignup.ts` (new, imported in `src/index.ts`): handlers for `evt:join` (ephemeral class picker, current class preselected), `evt:pickclass` (saves/updates the sign-up, re-renders the post, replies "Signed up as ⚔️ Gladiator"), `evt:leave` ("You're not signed up." if none) and `evt:roster` (ephemeral full roster, split into several messages). Sign-ups are refused when the event is cancelled, ended, started or gone. Other tickets can add `evt:*` actions with `registerEventAction`. If the event post was deleted, the event is marked ended and the user gets an error. A concurrent second insert becomes an update.
+- `src/domain/eventMessage.ts`: roster is grouped by role then class with counts per role and a Total field. When it would exceed 1024 chars per field or the embed budget, it switches to counts per class; `isRosterCompact` and `formatFullRoster` support that. `src/interactions/eventMessage.ts` adds a "Show full roster" button in compact mode.
+- Tests: roster renderer with 0, 5 and 300 sign-ups (300 stays within embed limits), full-roster splitting, `saveSignup`, `signupRefusal`. `tsc --noEmit` is clean and `npx vitest run` passes (54 tests).
+- `npm run test` from `run-after-done` was skipped as instructed (the prompt said the project doesn't offer it; `package.json` does define a `test` script, so it exists). I ran `npx vitest run` directly for verification.
+- Not verified against a live Discord server. To verify: sign up, switch class, leave, and delete the post, then check the post updates each time.
+- No new dependencies.
