@@ -51,6 +51,21 @@ export function parseLocalDateTime(input: string, timeZone: string): ParseResult
   return { ok: true, epochSeconds: Math.floor(utcMs / 1000) };
 }
 
+/** Formats epoch seconds as `YYYY-MM-DD HH:mm` wall-clock time in `timeZone` (the inverse of `parseLocalDateTime`). */
+export function formatLocalDateTime(epochSeconds: number, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).formatToParts(new Date(epochSeconds * 1000));
+  const get = (type: string) => parts.find((p) => p.type === type)!.value;
+  return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}`;
+}
+
 /** Parses like `parseLocalDateTime` and additionally requires the moment to lie after `nowSeconds`. */
 export function parseFutureDateTime(input: string, timeZone: string, nowSeconds: number): ParseResult {
   const r = parseLocalDateTime(input, timeZone);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CLASSES } from './classes.js';
-import { buildEventEmbed, EMPTY_ROSTER_TEXT, formatFullRoster, isRosterCompact } from './eventMessage.js';
+import { buildEventEmbed, EMPTY_ROSTER_TEXT, formatFullRoster, formatTimeChangeNotice, isRosterCompact } from './eventMessage.js';
 
 const event = { id: 1, creatorId: '99', title: 'Raid', description: 'Bring pots', startsAt: 1900000000, status: 'open' as const };
 
@@ -31,7 +31,7 @@ describe('buildEventEmbed', () => {
     expect(e.fields.find((f) => f.name === 'Total')!.value).toBe('3');
   });
   it('marks cancelled events', () => {
-    expect(buildEventEmbed({ ...event, status: 'cancelled' }, []).title).toBe('[Cancelled] Raid');
+    expect(buildEventEmbed({ ...event, status: 'cancelled' }, []).title).toBe('❌ Cancelled: Raid');
   });
 });
 
@@ -59,5 +59,15 @@ describe('roster size handling', () => {
     expect(chunks.length).toBeGreaterThan(1);
     expect(chunks.every((c) => c.length <= 2000)).toBe(true);
     expect(chunks.join('\n')).toContain('Total: 300');
+  });
+});
+
+describe('formatTimeChangeNotice', () => {
+  it('mentions everyone and names the new time', () => {
+    expect(formatTimeChangeNotice(['1', '2'], 1900000000)).toBe('<@1> <@2> Time changed to <t:1900000000:F>');
+    expect(formatTimeChangeNotice([], 1900000000)).toBe('Time changed to <t:1900000000:F>');
+  });
+  it('stays within 2000 characters', () => {
+    expect(formatTimeChangeNotice(make(200).map((s) => s.userId), 1900000000).length).toBeLessThanOrEqual(2000);
   });
 });

@@ -18,6 +18,13 @@ export function renderEventMessage(event: EventView, signups: readonly SignupVie
   if (buttons && isRosterCompact(event, signups)) {
     buttons.addComponents(new ButtonBuilder().setCustomId(buildCustomId(EVENT_AREA, 'roster', event.id)).setLabel('Show full roster').setStyle(ButtonStyle.Secondary));
   }
-  const components = buttons ? [buttons] : [];
+  const closed =
+    event.status === 'cancelled'
+      ? new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId(buildCustomId(EVENT_AREA, 'join', event.id)).setLabel('Sign up').setStyle(ButtonStyle.Success).setDisabled(true),
+          new ButtonBuilder().setCustomId(buildCustomId(EVENT_AREA, 'leave', event.id)).setLabel('Leave').setStyle(ButtonStyle.Secondary).setDisabled(true),
+        )
+      : null;
+  const components = buttons ? [buttons] : closed ? [closed] : [];
   return { embeds: [embed], components };
 }

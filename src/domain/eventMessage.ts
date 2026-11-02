@@ -113,9 +113,23 @@ ${line}` : line;
   return chunks;
 }
 
+/** Channel reply that tells signed-up users about a new start time (mentions are capped to fit one message). */
+export function formatTimeChangeNotice(userIds: readonly string[], startsAt: number): string {
+  const text = `Time changed to <t:${startsAt}:F>`;
+  const mentions: string[] = [];
+  let length = text.length;
+  for (const id of userIds) {
+    const mention = `<@${id}>`;
+    if (length + 1 + mention.length > MESSAGE_LIMIT) break;
+    mentions.push(mention);
+    length += 1 + mention.length;
+  }
+  return mentions.length > 0 ? `${mentions.join(' ')} ${text}` : text;
+}
+
 /** Embed content of an event post; shared by every ticket that refreshes the post. */
 export function buildEventEmbed(event: EventView, signups: readonly SignupView[]): EventEmbedData {
-  const prefix = event.status === 'cancelled' ? '[Cancelled] ' : event.status === 'ended' ? '[Ended] ' : '';
+  const prefix = event.status === 'cancelled' ? '❌ Cancelled: ' : event.status === 'ended' ? '[Ended] ' : '';
   return {
     title: `${prefix}${event.title}`,
     description: event.description,

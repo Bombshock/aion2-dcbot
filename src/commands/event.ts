@@ -1,25 +1,21 @@
 import {
-  ActionRowBuilder,
   MessageFlags,
-  ModalBuilder,
   PermissionFlagsBits,
   SlashCommandBuilder,
-  TextInputBuilder,
-  TextInputStyle,
   type ChatInputCommandInteraction,
   type GuildMember,
   type ModalSubmitInteraction,
 } from 'discord.js';
 import type { Command } from './index.js';
-import { DATE_FORMAT_HINT, parseFutureDateTime } from '../domain/datetime.js';
+import { parseFutureDateTime } from '../domain/datetime.js';
 import { createEventsRepo } from '../db/events.js';
 import { getDb } from '../db/instance.js';
+import { buildEventModal, EVENT_FIELD as FIELD } from '../interactions/eventModal.js';
 import { renderEventMessage } from '../interactions/eventMessage.js';
 import { buildCustomId, registerHandler } from '../interactions/router.js';
 import { getEventsChannel, getGuildSettings, SETUP_REQUIRED_MESSAGE } from '../settings.js';
 
 const CREATE_AREA = 'evtcreate';
-const FIELD = { title: 'title', description: 'description', when: 'when' } as const;
 
 const data = new SlashCommandBuilder()
   .setName('event')
@@ -38,28 +34,6 @@ function canCreateEvents(member: GuildMember | null, organizerRoleId: string | n
 }
 
 const NOT_ALLOWED = 'You need the Manage Server permission or the organizer role to create events.';
-
-function buildModal() {
-  const row = (input: TextInputBuilder) => new ActionRowBuilder<TextInputBuilder>().addComponents(input);
-  return new ModalBuilder()
-    .setCustomId(buildCustomId(CREATE_AREA, 'submit'))
-    .setTitle('Create event')
-    .addComponents(
-      row(new TextInputBuilder().setCustomId(FIELD.title).setLabel('Title').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(100)),
-      row(
-        new TextInputBuilder().setCustomId(FIELD.description).setLabel('Description').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(2000),
-      ),
-      row(
-        new TextInputBuilder()
-          .setCustomId(FIELD.when)
-          .setLabel(`Date & time (${DATE_FORMAT_HINT})`)
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-          .setPlaceholder('2030-01-31 20:00')
-          .setMaxLength(16),
-      ),
-    );
-}
 
 async function submit(i: ModalSubmitInteraction) {
   const guild = i.guild;
@@ -126,7 +100,7 @@ export const event: Command = {
         const settings = getGuildSettings(guild.id);
         if (!canCreateEvents(interaction.member as GuildMember | null, settings.organizerRoleId)) return reply(interaction, NOT_ALLOWED);
         if (!settings.eventsChannelId) return reply(interaction, SETUP_REQUIRED_MESSAGE);
-        return interaction.showModal(buildModal());
+        return interaction.showModal(buildEventModal(buildCustomId(CREATE_AREA, 'submit'), 'Create event'));
       }
     }
   },

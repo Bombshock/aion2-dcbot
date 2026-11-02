@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseFutureDateTime, parseLocalDateTime } from './datetime.js';
+import { formatLocalDateTime, parseFutureDateTime, parseLocalDateTime } from './datetime.js';
 
 const secs = (iso: string) => Date.parse(iso) / 1000;
 
@@ -47,5 +47,18 @@ describe('parseFutureDateTime', () => {
   });
   it('passes format errors through', () => {
     expect(parseFutureDateTime('nope', 'UTC', now).ok).toBe(false);
+  });
+});
+
+describe('formatLocalDateTime', () => {
+  it('round-trips with parseLocalDateTime', () => {
+    for (const [input, zone] of [
+      ['2030-01-15 20:00', 'Europe/Berlin'],
+      ['2030-07-15 09:05', 'America/New_York'],
+      ['2030-01-15 00:00', 'UTC'],
+    ] as const) {
+      const parsed = parseLocalDateTime(input, zone);
+      expect(parsed.ok && formatLocalDateTime(parsed.epochSeconds, zone)).toBe(input);
+    }
   });
 });
