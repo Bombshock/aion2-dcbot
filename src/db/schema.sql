@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS groups (
   template_id INTEGER REFERENCES group_templates (id) ON DELETE SET NULL,
   title       TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
+  slots_json  TEXT NOT NULL,
   starts_at   INTEGER,
   status      TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'full', 'closed')),
   created_at  INTEGER NOT NULL

@@ -76,3 +76,19 @@ Any member can open a group from a template in the group search channel. Depends
 > Suggestion: yes, create a thread on the post and add each member when they join.
 
 not for now but add a ticket to do it later
+
+## Summary
+
+- `/lfg create template:<autocomplete> class:<choice>` (`src/commands/lfg.ts`, registered in `commands/index.ts`). Template autocomplete lists built-in and guild templates (value = template id); class choices come from `CLASSES`. Checks before the modal (and again on submit): groups channel set, template known, class fits a slot, max 3 open/full groups. Modal `grp:create:<templateId>:<classId>` with title, required description and optional When (empty = now, past/invalid shows the typed values back, nothing saved).
+- Group and creator-as-member are inserted in one transaction (`createGroupsRepo.createWithMember`), placed via `assignSlot`; a 1-slot template yields status `full`. If posting fails the group is deleted and the error is shown.
+- Schema: `groups.slots_json` (NOT NULL) added, no migration (delete local dev DBs). `GroupRecord`/`NewGroup` carry `slotsJson`; new `countActiveByCreator`.
+- `src/domain/groups.ts`: pure slot lines, footer, embed data, `MAX_ACTIVE_GROUPS_PER_CREATOR`, `checkCreateGroup`. `src/interactions/groupMessage.ts`: `renderGroupMessage` with Join/Leave/Manage buttons (Join disabled when full).
+- Threads: not done, as requested; the existing refinement ticket *group threads* covers it.
+- Note for tickets 10/11: `registerHandler` holds one handler per area, and `lfg.ts` registers the `grp` area for `create`. Join/leave/manage handlers must extend that dispatch (or the handler should move out of `lfg.ts`).
+- New dependencies: none.
+
+### Verify
+
+- `npx vitest run`: 89 tests pass (new `src/domain/groups.test.ts`: slot lines, footer, Cleric → Healer, fitting-classes message, 3-group limit with closed groups ignored against an in-memory DB). `tsc --noEmit` is clean.
+- `npm run test` (from `run-after-done`) was first skipped on instruction, then run once allowed: 89 tests pass.
+- Not run against a live Discord server; manual checks from "Verify" above still apply (run `npm run register` first for the new command).

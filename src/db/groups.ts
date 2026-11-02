@@ -19,6 +19,8 @@ export interface GroupRecord {
   templateId: number | null;
   title: string;
   description: string;
+  /** Copy of the template's slots; later template edits don't touch the group. */
+  slotsJson: string;
   startsAt: number | null;
   status: GroupStatus;
   createdAt: number;
@@ -32,7 +34,9 @@ export interface NewGroup {
   templateId?: number | null;
   title: string;
   description?: string;
+  slotsJson: string;
   startsAt?: number | null;
+  status?: GroupStatus;
   createdAt?: number;
 }
 
@@ -64,6 +68,7 @@ interface GroupRow {
   template_id: number | null;
   title: string;
   description: string;
+  slots_json: string;
   starts_at: number | null;
   status: GroupStatus;
   created_at: number;
@@ -88,6 +93,7 @@ const toGroup = (r: GroupRow): GroupRecord => ({
   templateId: r.template_id,
   title: r.title,
   description: r.description,
+  slotsJson: r.slots_json,
   startsAt: r.starts_at,
   status: r.status,
   createdAt: r.created_at,
@@ -169,8 +175,8 @@ export function createGroupsRepo(db: Database.Database) {
     create(g: NewGroup): GroupRecord {
       const info = db
         .prepare(
-          `INSERT INTO groups (guild_id, channel_id, message_id, creator_id, template_id, title, description, starts_at, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO groups (guild_id, channel_id, message_id, creator_id, template_id, title, description, slots_json, starts_at, status, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           g.guildId,
@@ -180,10 +186,27 @@ export function createGroupsRepo(db: Database.Database) {
           g.templateId ?? null,
           g.title,
           g.description ?? '',
+          g.slotsJson,
           g.startsAt ?? null,
+          g.status ?? 'open',
           g.createdAt ?? nowSeconds(),
         );
       return this.get(Number(info.lastInsertRowid))!;
+    },
+    /** Inserts the group and its first member in one transaction. */
+    createWithMember(g: NewGroup, member: { userId: string; classId: string; slotIndex: number }): GroupRecord {
+      return db.transaction(() => {
+        const group = this.create(g);
+        this.addMember(group.id, member.userId, member.classId, member.slotIndex, group.createdAt);
+        return group;
+      })();
+    },
+    /** Groups of the creator in the guild with status open or full. */
+    countActiveByCreator(guildId: string, creatorId: string): number {
+      const row = db
+        .prepare("SELECT COUNT(*) AS n FROM groups WHERE guild_id = ? AND creator_id = ? AND status IN ('open', 'full')")
+        .get(guildId, creatorId) as { n: number };
+      return row.n;
     },
     get(id: number): GroupRecord | undefined {
       const row = db.prepare('SELECT * FROM groups WHERE id = ?').get(id) as GroupRow | undefined;

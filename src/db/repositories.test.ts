@@ -118,7 +118,7 @@ describe('group templates', () => {
 });
 
 describe('groups', () => {
-  const base = { guildId: 'g1', channelId: 'c1', creatorId: 'u1', title: 'Dungeon', createdAt: 1 };
+  const base = { guildId: 'g1', channelId: 'c1', creatorId: 'u1', title: 'Dungeon', slotsJson: '[]', createdAt: 1 };
 
   it('creates, reads, updates and deletes', () => {
     const repo = createGroupsRepo(db);
