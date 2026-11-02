@@ -41,7 +41,8 @@ const data = new SlashCommandBuilder()
           .setRequired(true)
           .addChoices(...CLASSES.map((c) => ({ name: c.name, value: c.id }))),
       ),
-  );
+  )
+  .addSubcommand((s) => s.setName('list').setDescription('List the open groups of this server'));
 
 const reply = (i: ChatInputCommandInteraction | ModalSubmitInteraction, content: string) =>
   i.reply({ content, flags: MessageFlags.Ephemeral });
@@ -172,6 +173,17 @@ export const lfg: Command = {
     const guild = interaction.guild;
     if (!guild) return reply(interaction, 'This command only works in a server.');
     switch (interaction.options.getSubcommand()) {
+      case 'list': {
+        const groups = createGroupsRepo(getDb())
+          .listByGuild(guild.id)
+          .filter((g) => g.status !== 'closed' && g.messageId);
+        if (groups.length === 0) return reply(interaction, 'There are no open groups.');
+        const lines = groups.map((g) => {
+          const when = g.startsAt === null ? 'now' : `<t:${g.startsAt}:f>`;
+          return `• [${g.title}](https://discord.com/channels/${g.guildId}/${g.channelId}/${g.messageId}) · ${g.status} · ${when}`;
+        });
+        return reply(interaction, lines.join('\n').slice(0, 2000));
+      }
       case 'create': {
         const channel = await getGroupsChannel(guild);
         if (!channel) return reply(interaction, SETUP_REQUIRED_MESSAGE);

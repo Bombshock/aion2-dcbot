@@ -4,6 +4,7 @@ import { commandMap } from './commands/index.js';
 import { routeInteraction } from './interactions/router.js';
 import './interactions/eventSignup.js';
 import './interactions/eventManage.js';
+import './interactions/groupManage.js';
 
 const config = loadConfig();
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });

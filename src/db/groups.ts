@@ -293,6 +293,19 @@ export function createGroupsRepo(db: Database.Database) {
         return { ok: true, group: updated, members, slotIndex, switched: existing, becameFull: group.status !== 'full' && status === 'full' };
       })();
     },
+    /** Removes a member on behalf of a manager. The creator can't be kicked; the group reopens if it was full. */
+    kickMember(groupId: number, userId: string): KickResult {
+      return db.transaction((): KickResult => {
+        const group = this.get(groupId);
+        if (!group) return { ok: false, reason: 'not_found' };
+        if (group.status === 'closed') return { ok: false, reason: 'closed' };
+        if (group.creatorId === userId) return { ok: false, reason: 'creator' };
+        if (!this.removeMember(groupId, userId)) return { ok: false, reason: 'not_member' };
+        const members = this.listMembers(groupId);
+        const updated = this.update(groupId, { status: statusForFill(parseSlotsJson(group.slotsJson), members) })!;
+        return { ok: true, group: updated, members };
+      })();
+    },
     /** Removes the member, hands the group to the earliest remaining member if the creator left, and closes it when empty. */
     leaveMember(groupId: number, userId: string): LeaveResult {
       return db.transaction((): LeaveResult => {
@@ -326,6 +339,10 @@ export type JoinResult =
 export type LeaveResult =
   | { ok: true; group: GroupRecord; members: GroupMember[]; newCreatorId: string | null }
   | { ok: false; reason: 'not_found' | 'closed' | 'not_member' };
+
+export type KickResult =
+  | { ok: true; group: GroupRecord; members: GroupMember[] }
+  | { ok: false; reason: 'not_found' | 'closed' | 'creator' | 'not_member' };
 
 export type GroupsRepo =ReturnType<typeof createGroupsRepo>;
 export type GroupTemplatesRepo = ReturnType<typeof createGroupTemplatesRepo>;

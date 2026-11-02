@@ -76,10 +76,10 @@ export function buildSlotLines(slots: readonly TemplateSlot[], members: readonly
   return slots.map((slot, i) => formatSlotLine(i, slot, members.find((m) => m.slotIndex === i)));
 }
 
-/** `"1/5 · open"`, `"5/5 · full ✅"` or `"3/5 · closed"`. */
+/** `"1/5 · open"`, `"5/5 · full ✅"` or `"3/5 · 🔒 Closed"`. */
 export function buildFooter(slots: readonly TemplateSlot[], members: readonly GroupMemberView[], status: GroupStatusView): string {
   const total = slots.length;
-  if (status === 'closed') return `${members.length}/${total} · closed`;
+  if (status === 'closed') return `${members.length}/${total} · 🔒 Closed`;
   return status === 'full' ? `${total}/${total} · full ✅` : `${members.length}/${total} · open`;
 }
 
