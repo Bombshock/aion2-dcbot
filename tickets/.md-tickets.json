@@ -58,7 +58,11 @@
       "Bash(python:*)",
       "Bash(sed:*)",
       "PowerShell(Add-Content:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(rm -f /tmp/p.mjs; npx tsc --noEmit -p ../tsconfig.json)",
+      "Bash(rm -f /tmp/p.mjs; git status --short)",
+      "Bash(rm -f /tmp/p.mjs; git status --short | head -3)",
+      "Bash(rm -f /tmp/p.mjs)"
     ]
   }
 }

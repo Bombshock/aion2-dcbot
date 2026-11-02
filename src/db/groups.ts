@@ -221,6 +221,16 @@ export function createGroupsRepo(db: Database.Database) {
         : db.prepare('SELECT * FROM groups WHERE guild_id = ? ORDER BY id').all(guildId);
       return (rows as GroupRow[]).map(toGroup);
     },
+    /** Open or full groups past their expiry: `starts_at + afterStart`, or `created_at + afterCreate` without a start time. */
+    listExpired(now: number, afterStartSeconds: number, afterCreateSeconds: number): GroupRecord[] {
+      const rows = db
+        .prepare(
+          `SELECT * FROM groups WHERE status IN ('open', 'full')
+           AND ((starts_at IS NOT NULL AND starts_at + ? <= ?) OR (starts_at IS NULL AND created_at + ? <= ?)) ORDER BY id`,
+        )
+        .all(afterStartSeconds, now, afterCreateSeconds, now) as GroupRow[];
+      return rows.map(toGroup);
+    },
     update(id: number, patch: GroupUpdate): GroupRecord | undefined {
       const keys = (Object.keys(patch) as (keyof GroupUpdate)[]).filter((k) => patch[k] !== undefined);
       if (keys.length > 0) {

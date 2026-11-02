@@ -15,7 +15,7 @@ import { formatClass } from '../domain/classes.js';
 import { DATE_FORMAT_HINT, formatLocalDateTime, parseFutureDateTime } from '../domain/datetime.js';
 import { getGuildSettings } from '../settings.js';
 import { GROUP_AREA } from './groupMessage.js';
-import { GROUP_GONE_MESSAGE, refreshGroupPost, registerGroupAction } from './groupJoin.js';
+import { closeGroup, GROUP_GONE_MESSAGE, refreshGroupPost, registerGroupAction } from './groupJoin.js';
 import { buildCustomId, type ComponentInteraction } from './router.js';
 
 const NOT_FOUND_MESSAGE = 'This group no longer exists.';
@@ -201,7 +201,6 @@ registerGroupAction('closeconfirm', async (interaction, parsed) => {
   if (!found) return;
   const { repo } = found;
   await interaction.deferUpdate();
-  const updated = repo.update(found.group.id, { status: 'closed' });
-  const ok = updated ? await refreshGroupPost(interaction.client, repo, updated) : false;
+  const ok = await closeGroup(interaction.client, repo, found.group.id);
   await interaction.editReply({ content: ok ? 'The group was closed.' : GROUP_GONE_MESSAGE, components: [] });
 });

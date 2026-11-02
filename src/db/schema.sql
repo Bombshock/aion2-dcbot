@@ -16,7 +16,8 @@ CREATE TABLE IF NOT EXISTS events (
   description TEXT NOT NULL DEFAULT '',
   starts_at   INTEGER NOT NULL,
   status      TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'cancelled', 'ended')),
-  created_at  INTEGER NOT NULL
+  created_at  INTEGER NOT NULL,
+  reminded_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_events_guild_status ON events (guild_id, status, starts_at);
 
@@ -60,4 +61,9 @@ CREATE TABLE IF NOT EXISTS group_members (
   joined_at  INTEGER NOT NULL,
   PRIMARY KEY (group_id, user_id),
   UNIQUE (group_id, slot_index)
+);
+
+CREATE TABLE IF NOT EXISTS user_settings (
+  user_id      TEXT PRIMARY KEY,
+  dm_reminders INTEGER NOT NULL DEFAULT 0
 );

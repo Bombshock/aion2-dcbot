@@ -50,6 +50,12 @@ export async function refreshGroupPost(client: Client, repo: GroupsRepo, group: 
   }
 }
 
+/** Closes the group and re-renders its post; the one place to hook thread archiving into later. Returns false when the post is gone. */
+export async function closeGroup(client: Client, repo: GroupsRepo, groupId: number): Promise<boolean> {
+  const updated = repo.update(groupId, { status: 'closed' });
+  return updated ? refreshGroupPost(client, repo, updated) : false;
+}
+
 /** Posts a plain message in the group's channel, pinging only the given users. Failures are logged, not thrown. */
 async function announce(client: Client, group: GroupRecord, content: string, users: string[]): Promise<void> {
   try {

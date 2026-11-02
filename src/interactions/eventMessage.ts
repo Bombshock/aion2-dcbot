@@ -19,7 +19,7 @@ export function renderEventMessage(event: EventView, signups: readonly SignupVie
     buttons.addComponents(new ButtonBuilder().setCustomId(buildCustomId(EVENT_AREA, 'roster', event.id)).setLabel('Show full roster').setStyle(ButtonStyle.Secondary));
   }
   const closed =
-    event.status === 'cancelled'
+    event.status !== 'open'
       ? new ActionRowBuilder<ButtonBuilder>().addComponents(
           new ButtonBuilder().setCustomId(buildCustomId(EVENT_AREA, 'join', event.id)).setLabel('Sign up').setStyle(ButtonStyle.Success).setDisabled(true),
           new ButtonBuilder().setCustomId(buildCustomId(EVENT_AREA, 'leave', event.id)).setLabel('Leave').setStyle(ButtonStyle.Secondary).setDisabled(true),

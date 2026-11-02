@@ -13,6 +13,8 @@ export interface EventRecord {
   startsAt: number;
   status: EventStatus;
   createdAt: number;
+  /** Unix time the reminder went out; null while it is still pending. */
+  remindedAt: number | null;
 }
 
 export interface NewEvent {
@@ -26,7 +28,7 @@ export interface NewEvent {
   createdAt?: number;
 }
 
-export type EventUpdate = Partial<Pick<EventRecord, 'channelId' | 'messageId' | 'title' | 'description' | 'startsAt' | 'status'>>;
+export type EventUpdate = Partial<Pick<EventRecord, 'channelId' | 'messageId' | 'title' | 'description' | 'startsAt' | 'status' | 'remindedAt'>>;
 
 export interface EventSignup {
   eventId: number;
@@ -46,6 +48,7 @@ interface EventRow {
   starts_at: number;
   status: EventStatus;
   created_at: number;
+  reminded_at: number | null;
 }
 
 interface SignupRow {
@@ -66,6 +69,7 @@ const toEvent = (r: EventRow): EventRecord => ({
   startsAt: r.starts_at,
   status: r.status,
   createdAt: r.created_at,
+  remindedAt: r.reminded_at,
 });
 
 const toSignup = (r: SignupRow): EventSignup => ({
@@ -84,6 +88,7 @@ const COLUMNS: Record<keyof EventUpdate, string> = {
   description: 'description',
   startsAt: 'starts_at',
   status: 'status',
+  remindedAt: 'reminded_at',
 };
 
 export function createEventsRepo(db: Database.Database) {
@@ -112,6 +117,18 @@ export function createEventsRepo(db: Database.Database) {
       const rows = db
         .prepare(`SELECT * FROM events WHERE status = 'open' AND starts_at >= ? AND starts_at < ? ORDER BY starts_at, id`)
         .all(from, to) as EventRow[];
+      return rows.map(toEvent);
+    },
+    /** Open events not yet reminded that start within `leadSeconds` after `now` (and not at or before it). */
+    listDueForReminder(now: number, leadSeconds: number): EventRecord[] {
+      const rows = db
+        .prepare(`SELECT * FROM events WHERE status = 'open' AND reminded_at IS NULL AND starts_at - ? <= ? AND ? < starts_at ORDER BY starts_at, id`)
+        .all(leadSeconds, now, now) as EventRow[];
+      return rows.map(toEvent);
+    },
+    /** Open events whose start time has been reached. */
+    listDueToStart(now: number): EventRecord[] {
+      const rows = db.prepare(`SELECT * FROM events WHERE status = 'open' AND starts_at <= ? ORDER BY starts_at, id`).all(now) as EventRow[];
       return rows.map(toEvent);
     },
     update(id: number, patch: EventUpdate): EventRecord | undefined {

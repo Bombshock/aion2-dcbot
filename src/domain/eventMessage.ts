@@ -129,7 +129,7 @@ export function formatTimeChangeNotice(userIds: readonly string[], startsAt: num
 
 /** Embed content of an event post; shared by every ticket that refreshes the post. */
 export function buildEventEmbed(event: EventView, signups: readonly SignupView[]): EventEmbedData {
-  const prefix = event.status === 'cancelled' ? '❌ Cancelled: ' : event.status === 'ended' ? '[Ended] ' : '';
+  const prefix = event.status === 'cancelled' ? '❌ Cancelled: ' : event.status === 'ended' ? '▶️ Started: ' : '';
   return {
     title: `${prefix}${event.title}`,
     description: event.description,

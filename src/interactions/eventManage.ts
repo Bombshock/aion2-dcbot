@@ -12,6 +12,7 @@ import {
 } from 'discord.js';
 import { formatLocalDateTime, parseFutureDateTime } from '../domain/datetime.js';
 import { formatClass } from '../domain/classes.js';
+import { SCHEDULE } from '../domain/schedule.js';
 import { formatTimeChangeNotice } from '../domain/eventMessage.js';
 import { createEventsRepo, type EventRecord } from '../db/events.js';
 import { getDb } from '../db/instance.js';
@@ -123,7 +124,9 @@ registerEventAction('editsubmit', async (interaction, parsed) => {
   }
 
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const updated = repo.update(event.id, { title, description, startsAt: parsedTime.epochSeconds });
+  // A new start more than the reminder lead ahead gets its own reminder.
+  const resetReminder = parsedTime.epochSeconds !== event.startsAt && parsedTime.epochSeconds - SCHEDULE.eventReminderLeadSeconds > nowSeconds();
+  const updated = repo.update(event.id, { title, description, startsAt: parsedTime.epochSeconds, ...(resetReminder ? { remindedAt: null } : {}) });
   if (!updated) return void (await interaction.editReply(NOT_FOUND_MESSAGE));
   const ok = await refreshEventPost(interaction.client, repo, updated);
   if (!ok) return void (await interaction.editReply(EVENT_GONE_MESSAGE));

@@ -5,12 +5,15 @@ import { routeInteraction } from './interactions/router.js';
 import './interactions/eventSignup.js';
 import './interactions/eventManage.js';
 import './interactions/groupManage.js';
+import { getDb } from './db/instance.js';
+import { startScheduler } from './scheduler.js';
 
 const config = loadConfig();
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 client.once(Events.ClientReady, (c) => {
   console.log(`Logged in as ${c.user.tag}`);
+  startScheduler(c, getDb());
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {

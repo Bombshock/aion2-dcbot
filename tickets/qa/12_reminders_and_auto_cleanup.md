@@ -77,3 +77,17 @@ isn't deployed yet, so no migration; delete local dev DBs.
 > feel spammy).
 
 dm reminders should be off by default but can be enabled by the user
+
+## Summary
+
+- **Schema:** `events.reminded_at` and new `user_settings` table (`src/db/schema.sql`); no migration, delete local dev DBs.
+- **Repos:** `listDueForReminder(now, lead)` / `listDueToStart(now)` and `remindedAt` in `src/db/events.ts`; `listExpired(now, …)` in `src/db/groups.ts`; new `src/db/userSettings.ts`. All take `now` as a parameter.
+- **Domain:** `src/domain/schedule.ts` holds the timing constants, the reminder text and the pure `buildReminderMessages` (splits mentions into messages ≤ 2000 chars).
+- **Scheduler:** `src/scheduler.ts` (`runTick`, `startScheduler`), started from `src/index.ts` on ready. Runs every 60 s, skips a tick while the previous one runs, logs per-item errors and continues. `reminded_at` is set before sending, so a failed send is never retried every minute and a restart never double-posts. Event start marks the event `ended` and re-renders it.
+- **Event post:** ended events now show "▶️ Started: …" with Sign up / Leave disabled (`src/domain/eventMessage.ts`, `src/interactions/eventMessage.ts`).
+- **Groups:** new shared `closeGroup` in `src/interactions/groupJoin.ts`, used by Manage → Close group and the scheduler. Last-member-leave still closes in `leaveMember` followed by `refreshGroupPost`; it doesn't call `closeGroup`.
+- **DM reminders:** `/reminders dm enabled:<bool>` (`src/commands/reminders.ts`), off by default, per user. Opted-in users get the DM as well as the channel mention; failed DMs are logged. The sign-up confirmation shows the tip while DMs are off.
+- **Edit time:** `eventManage` resets `reminded_at` when the new start is more than 30 min ahead.
+- **Tests added:** `src/scheduler.test.ts` (window boundaries, cancelled/reminded rows, group expiry, user settings, `runTick` with a fake client and clock) and `src/domain/schedule.test.ts` (mention splitting).
+
+**Verification:** `npx tsc --noEmit` passes. `npx vitest run` passes (15 files, 113 tests, including the new ones). `npm run test` itself was skipped as instructed for `run-after-done`; I ran vitest directly afterwards. Run `npm run register` for the new `/reminders` command. Manual checks are in the *Verify* section above. No new dependencies.

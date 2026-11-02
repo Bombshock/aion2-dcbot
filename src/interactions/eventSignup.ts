@@ -3,6 +3,7 @@ import { formatClass, getClass } from '../domain/classes.js';
 import { formatFullRoster } from '../domain/eventMessage.js';
 import { createEventsRepo, type EventRecord, type EventsRepo } from '../db/events.js';
 import { getDb } from '../db/instance.js';
+import { createUserSettingsRepo } from '../db/userSettings.js';
 import { buildClassPicker } from './classPicker.js';
 import { renderEventMessage, EVENT_AREA } from './eventMessage.js';
 import { registerHandler, type ComponentInteraction, type ParsedCustomId } from './router.js';
@@ -12,6 +13,7 @@ const DISCORD_UNKNOWN_MESSAGE = 10008;
 
 export const EVENT_GONE_MESSAGE = 'The event post was deleted, so the event is now marked as ended.';
 const NOT_FOUND_MESSAGE = 'This event no longer exists.';
+const DM_TIP = 'Tip: `/reminders dm` to also get a DM before the event.';
 
 /** Why a sign-up is refused, or null when the event accepts changes. */
 export function signupRefusal(event: EventRecord | undefined, now: number): string | null {
@@ -88,7 +90,8 @@ registerEventAction('pickclass', async (interaction, parsed) => {
   await interaction.deferUpdate();
   saveSignup(repo, event.id, interaction.user.id, classId);
   const ok = await refreshEventPost(interaction.client, repo, event);
-  await interaction.editReply({ content: ok ? `Signed up as ${formatClass(classId)}` : EVENT_GONE_MESSAGE, components: [] });
+  const tip = createUserSettingsRepo(getDb()).getDmReminders(interaction.user.id) ? '' : `\n${DM_TIP}`;
+  await interaction.editReply({ content: ok ? `Signed up as ${formatClass(classId)}${tip}` : EVENT_GONE_MESSAGE, components: [] });
 });
 
 registerEventAction('leave', async (interaction, parsed) => {
