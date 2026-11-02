@@ -93,6 +93,28 @@ describe('group templates', () => {
     expect(repo.delete(own.id)).toBe(true);
     expect(repo.get(own.id)).toBeUndefined();
   });
+
+  it('finds visible templates by name, case-insensitive', () => {
+    const repo = createGroupTemplatesRepo(db);
+    const builtin = repo.create({ guildId: null, name: 'Duo (2)', slotsJson: '[]' });
+    const own = repo.create({ guildId: 'g1', name: 'Mine', slotsJson: '[]' });
+    expect(repo.findByName('g1', 'duo (2)')?.id).toBe(builtin.id);
+    expect(repo.findByName('g1', 'MINE')?.id).toBe(own.id);
+    expect(repo.findByName('g2', 'Mine')).toBeUndefined();
+  });
+
+  it('syncs built-ins: inserts missing ones and updates slots without duplicating', () => {
+    const repo = createGroupTemplatesRepo(db);
+    repo.syncBuiltins([{ name: 'Duo (2)', slotsJson: '[1]' }]);
+    repo.syncBuiltins([
+      { name: 'Duo (2)', slotsJson: '[2]' },
+      { name: 'Open (5)', slotsJson: '[5]' },
+    ]);
+    expect(repo.listForGuild('g1').map((t) => [t.guildId, t.name, t.slotsJson])).toEqual([
+      [null, 'Duo (2)', '[2]'],
+      [null, 'Open (5)', '[5]'],
+    ]);
+  });
 });
 
 describe('groups', () => {

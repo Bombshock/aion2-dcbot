@@ -56,7 +56,8 @@
       "Bash(npm install:*)",
       "Bash(cat:*)",
       "Bash(python:*)",
-      "Bash(sed:*)"
+      "Bash(sed:*)",
+      "PowerShell(Add-Content:*)"
     ]
   }
 }

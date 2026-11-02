@@ -130,6 +130,26 @@ export function createGroupTemplatesRepo(db: Database.Database) {
         .all(guildId) as TemplateRow[];
       return rows.map(toTemplate);
     },
+    /** Template visible to the guild (built-in or its own) with this name, case-insensitive. */
+    findByName(guildId: string, name: string): GroupTemplate | undefined {
+      const row = db
+        .prepare('SELECT * FROM group_templates WHERE (guild_id IS NULL OR guild_id = ?) AND name = ? COLLATE NOCASE ORDER BY id LIMIT 1')
+        .get(guildId, name) as TemplateRow | undefined;
+      return row && toTemplate(row);
+    },
+    /** Inserts missing built-in templates (guild_id NULL) and updates the slots of existing ones, matched by name. */
+    syncBuiltins(templates: readonly { name: string; slotsJson: string }[]): void {
+      const find = db.prepare('SELECT id FROM group_templates WHERE guild_id IS NULL AND name = ?');
+      const insert = db.prepare('INSERT INTO group_templates (guild_id, name, slots_json) VALUES (NULL, ?, ?)');
+      const update = db.prepare('UPDATE group_templates SET slots_json = ? WHERE id = ?');
+      db.transaction(() => {
+        for (const t of templates) {
+          const row = find.get(t.name) as { id: number } | undefined;
+          if (row) update.run(t.slotsJson, row.id);
+          else insert.run(t.name, t.slotsJson);
+        }
+      })();
+    },
     update(id: number, patch: { name?: string; slotsJson?: string }): GroupTemplate | undefined {
       db.prepare('UPDATE group_templates SET name = COALESCE(?, name), slots_json = COALESCE(?, slots_json) WHERE id = ?').run(
         patch.name ?? null,

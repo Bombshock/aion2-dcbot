@@ -3,6 +3,7 @@ import type { AutocompleteInteraction } from 'discord.js';
 import { ping } from './ping.js';
 import { event } from './event.js';
 import { setup } from './setup.js';
+import { template } from './template.js';
 
 export interface Command {
   data: { name: string; toJSON(): RESTPostAPIChatInputApplicationCommandsJSONBody };
@@ -11,6 +12,6 @@ export interface Command {
 }
 
 /** Add new commands to this list. */
-export const commands: Command[] = [ping, setup, event];
+export const commands: Command[] = [ping, setup, event, template];
 
 export const commandMap = new Map(commands.map((c) => [c.data.name, c]));
