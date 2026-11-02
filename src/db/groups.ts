@@ -1,4 +1,6 @@
 import type Database from 'better-sqlite3';
+import { statusForFill } from '../domain/groups.js';
+import { assignSlot, parseSlotsJson } from '../domain/templates.js';
 
 export type GroupStatus = 'open' | 'full' | 'closed';
 
@@ -41,7 +43,7 @@ export interface NewGroup {
 }
 
 export type GroupUpdate = Partial<
-  Pick<GroupRecord, 'channelId' | 'messageId' | 'templateId' | 'title' | 'description' | 'startsAt' | 'status'>
+  Pick<GroupRecord, 'channelId' | 'creatorId' | 'messageId' | 'templateId' | 'title' | 'description' | 'startsAt' | 'status'>
 >;
 
 export interface GroupMember {
@@ -111,6 +113,7 @@ const nowSeconds = () => Math.floor(Date.now() / 1000);
 
 const COLUMNS: Record<keyof GroupUpdate, string> = {
   channelId: 'channel_id',
+  creatorId: 'creator_id',
   messageId: 'message_id',
   templateId: 'template_id',
   title: 'title',
@@ -259,8 +262,70 @@ export function createGroupsRepo(db: Database.Database) {
     removeMember(groupId: number, userId: string): boolean {
       return db.prepare('DELETE FROM group_members WHERE group_id = ? AND user_id = ?').run(groupId, userId).changes > 0;
     },
+
+    /**
+     * Places the user in the best free slot for the class, or moves an existing member to one (their own slot counts as free).
+     * Runs in one transaction; the UNIQUE (group_id, slot_index) constraint backs it up.
+     */
+    joinMember(groupId: number, userId: string, classId: string): JoinResult {
+      return db.transaction((): JoinResult => {
+        const group = this.get(groupId);
+        if (!group) return { ok: false, reason: 'not_found' };
+        if (group.status === 'closed') return { ok: false, reason: 'closed' };
+        const slots = parseSlotsJson(group.slotsJson);
+        const before = this.listMembers(groupId);
+        const existing = before.some((m) => m.userId === userId);
+        const slotIndex = assignSlot(
+          slots,
+          before.filter((m) => m.userId !== userId),
+          classId,
+        );
+        if (slotIndex === null) return { ok: false, reason: 'no_slot' };
+        if (existing) {
+          // Moving to a free slot never collides: the target is not taken by anyone else.
+          this.updateMember(groupId, userId, { classId, slotIndex });
+        } else {
+          this.addMember(groupId, userId, classId, slotIndex);
+        }
+        const members = this.listMembers(groupId);
+        const status = statusForFill(slots, members);
+        const updated = this.update(groupId, { status })!;
+        return { ok: true, group: updated, members, slotIndex, switched: existing, becameFull: group.status !== 'full' && status === 'full' };
+      })();
+    },
+    /** Removes the member, hands the group to the earliest remaining member if the creator left, and closes it when empty. */
+    leaveMember(groupId: number, userId: string): LeaveResult {
+      return db.transaction((): LeaveResult => {
+        const group = this.get(groupId);
+        if (!group) return { ok: false, reason: 'not_found' };
+        if (group.status === 'closed') return { ok: false, reason: 'closed' };
+        if (!this.removeMember(groupId, userId)) return { ok: false, reason: 'not_member' };
+        const members = this.listMembers(groupId);
+        const patch: GroupUpdate = {};
+        let newCreatorId: string | null = null;
+        if (members.length === 0) {
+          patch.status = 'closed';
+        } else {
+          patch.status = statusForFill(parseSlotsJson(group.slotsJson), members);
+          if (group.creatorId === userId) {
+            const earliest = [...members].sort((a, b) => a.joinedAt - b.joinedAt || a.slotIndex - b.slotIndex)[0]!;
+            newCreatorId = earliest.userId;
+            patch.creatorId = newCreatorId;
+          }
+        }
+        return { ok: true, group: this.update(groupId, patch)!, members, newCreatorId };
+      })();
+    },
   };
 }
 
-export type GroupsRepo = ReturnType<typeof createGroupsRepo>;
+export type JoinResult =
+  | { ok: true; group: GroupRecord; members: GroupMember[]; slotIndex: number; switched: boolean; becameFull: boolean }
+  | { ok: false; reason: 'not_found' | 'closed' | 'no_slot' };
+
+export type LeaveResult =
+  | { ok: true; group: GroupRecord; members: GroupMember[]; newCreatorId: string | null }
+  | { ok: false; reason: 'not_found' | 'closed' | 'not_member' };
+
+export type GroupsRepo =ReturnType<typeof createGroupsRepo>;
 export type GroupTemplatesRepo = ReturnType<typeof createGroupTemplatesRepo>;

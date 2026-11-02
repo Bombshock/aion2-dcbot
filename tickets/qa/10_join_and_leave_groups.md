@@ -34,3 +34,13 @@ search posts*.
 - With two accounts: join, switch class, leave; post updates each time.
 - Fill a 2-slot Duo: post shows full and Join is disabled; one leaves, it reopens.
 - Unit test for the concurrent last-slot case on the repository.
+
+## Summary
+
+- `src/db/groups.ts`: new transactional `joinMember` (best free slot via `assignSlot`, own slot counts as free so members can switch class; updates status to `full`/`open`) and `leaveMember` (frees the slot, reopens a full group, hands the group to the earliest-joined remaining member if the creator leaves, closes it when empty). `creatorId` is now updatable.
+- `src/domain/groups.ts`: `joinableClassIds` – classes that fit a free slot.
+- `src/interactions/groupJoin.ts` (new): `grp:join` (picker with only fitting classes, "This group is full" otherwise), `grp:pickclass`, `grp:leave`, post refresh, creator mention on join, one "Group is ready!" mention of all members when the group becomes full. On "slot just taken" the user gets a fresh picker. Group actions now go through `registerGroupAction`; `lfg.ts` registers `create` that way (the area handler could previously only be registered once).
+- Groups have no threads yet, so announcements are posted in the group's channel.
+- Tests: `src/db/groupJoin.test.ts` (join, switch, full/reopen, concurrent last slot, creator handover, close, picker classes). `npx tsc --noEmit` and `vitest run` pass (99 tests).
+- `npm run test` from `run-after-done` was skipped as instructed (the project doesn't offer it); I ran `npx vitest run` directly instead.
+- Not verified against a live Discord server; verify with two accounts as described above.

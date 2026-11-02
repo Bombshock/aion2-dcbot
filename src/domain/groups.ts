@@ -49,6 +49,12 @@ export function checkCreateGroup(slots: TemplateSlot[], classId: string, activeG
   return { ok: true, value: slot };
 }
 
+/** Ids of the classes that fit a free slot, ignoring the slot the user already holds (so they can switch). */
+export function joinableClassIds(slots: TemplateSlot[], members: readonly (GroupMemberView)[], userId: string): string[] {
+  const others = members.filter((m) => m.userId !== userId);
+  return CLASSES.filter((c) => assignSlot(slots, others, c.id) !== null).map((c) => c.id);
+}
+
 /** `full` when every slot is taken, otherwise `open`. */
 export function statusForFill(slots: readonly TemplateSlot[], members: readonly unknown[]): 'open' | 'full' {
   return members.length >= slots.length ? 'full' : 'open';

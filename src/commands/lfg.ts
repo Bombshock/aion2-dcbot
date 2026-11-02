@@ -17,7 +17,8 @@ import { DATE_FORMAT_HINT, parseFutureDateTime } from '../domain/datetime.js';
 import { checkCreateGroup, statusForFill } from '../domain/groups.js';
 import { parseSlotsJson, type Result, type TemplateSlot } from '../domain/templates.js';
 import { GROUP_AREA, renderGroupMessage } from '../interactions/groupMessage.js';
-import { buildCustomId, registerHandler } from '../interactions/router.js';
+import { registerGroupAction } from '../interactions/groupJoin.js';
+import { buildCustomId } from '../interactions/router.js';
 import { getGroupsChannel, getGuildSettings, SETUP_REQUIRED_MESSAGE } from '../settings.js';
 
 const FIELD = { title: 'title', description: 'description', when: 'when' } as const;
@@ -159,8 +160,8 @@ const toView = (g: GroupRecord) => ({
   status: g.status,
 });
 
-registerHandler(GROUP_AREA, async (interaction, parsed) => {
-  if (!interaction.isModalSubmit() || parsed.action !== 'create') return;
+registerGroupAction('create', async (interaction, parsed) => {
+  if (!interaction.isModalSubmit()) return;
   const [templateId = '', classId = ''] = parsed.id.split(':');
   await submit(interaction, templateId, classId);
 });
