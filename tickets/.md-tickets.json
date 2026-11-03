@@ -62,7 +62,8 @@
       "Bash(rm -f /tmp/p.mjs; npx tsc --noEmit -p ../tsconfig.json)",
       "Bash(rm -f /tmp/p.mjs; git status --short)",
       "Bash(rm -f /tmp/p.mjs; git status --short | head -3)",
-      "Bash(rm -f /tmp/p.mjs)"
+      "Bash(rm -f /tmp/p.mjs)",
+      "Bash(f=tickets/progress/01_reminders_and_auto_cleanup.md:*)"
     ]
   }
 }

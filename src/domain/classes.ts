@@ -4,6 +4,7 @@ export interface AionClass {
   id: string;
   name: string;
   role: Role;
+  /** Unicode fallback; replaced at startup by the class icon's application emoji (`<:aion2_x:id>`). */
   emoji: string;
 }
 
@@ -22,10 +23,17 @@ export const CLASSES: readonly AionClass[] = [
 /** Roles in display order with the plural label used for roster headings. */
 export const ROLES: readonly { role: Role; label: string }[] = [
   { role: 'tank', label: 'Tanks' },
-  { role: 'healer', label: 'Healers' },
+  { role: 'healer', label: 'Heiler' },
   { role: 'dps', label: 'DPS' },
   { role: 'support', label: 'Support' },
 ];
+
+/** Icon of each role, shown on group slots. */
+export const ROLE_EMOJI: Readonly<Record<Role, string>> = { tank: '🛡️', healer: '💚', dps: '⚔️', support: '🎵' };
+/** Icon of slots that accept classes of more than one role. */
+export const MIXED_ROLE_EMOJI = '👤';
+/** Icon of classes no longer in the catalog. */
+export const UNKNOWN_ROLE_EMOJI = '❔';
 
 export function getClass(id: string): AionClass | undefined {
   return CLASSES.find((c) => c.id === id);

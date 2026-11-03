@@ -11,10 +11,10 @@ import { registerHandler, type ComponentInteraction, type ParsedCustomId } from 
 const DISCORD_UNKNOWN_CHANNEL = 10003;
 const DISCORD_UNKNOWN_MESSAGE = 10008;
 
-const NOT_FOUND_MESSAGE = 'This group no longer exists.';
-const CLOSED_MESSAGE = 'This group is closed.';
-const FULL_MESSAGE = 'This group is full';
-export const GROUP_GONE_MESSAGE = 'The group post was deleted, so the group is now closed.';
+const NOT_FOUND_MESSAGE = 'Diese Gruppe existiert nicht mehr.';
+const CLOSED_MESSAGE = 'Diese Gruppe ist geschlossen.';
+const FULL_MESSAGE = 'Diese Gruppe ist voll';
+export const GROUP_GONE_MESSAGE = 'Der Gruppen-Post wurde gelöscht, daher ist die Gruppe jetzt geschlossen.';
 
 type GroupAction = (interaction: ComponentInteraction, parsed: ParsedCustomId) => Promise<void>;
 const actions = new Map<string, GroupAction>();
@@ -89,7 +89,7 @@ registerGroupAction('pickclass', async (interaction, parsed) => {
   if (!interaction.isStringSelectMenu()) return;
   const repo = createGroupsRepo(getDb());
   const classId = interaction.values[0];
-  if (!classId || !getClass(classId)) return void (await interaction.update({ content: 'Unknown class.', components: [] }));
+  if (!classId || !getClass(classId)) return void (await interaction.update({ content: 'Unbekannte Klasse.', components: [] }));
 
   const result = repo.joinMember(Number(parsed.id), interaction.user.id, classId);
   if (!result.ok) {
@@ -99,26 +99,26 @@ registerGroupAction('pickclass', async (interaction, parsed) => {
     const group = repo.get(Number(parsed.id))!;
     const picker = pickerFor(repo, group, interaction.user.id);
     if (!picker) return void (await interaction.update({ content: FULL_MESSAGE, components: [] }));
-    return void (await interaction.update({ ...picker, content: 'Slot was just taken. Pick another class:' }));
+    return void (await interaction.update({ ...picker, content: 'Der Platz wurde gerade vergeben. Wähle eine andere Klasse:' }));
   }
 
   await interaction.deferUpdate();
   const { group, slotIndex } = result;
   const ok = await refreshGroupPost(interaction.client, repo, group);
-  const slotLabel = parseSlotsJson(group.slotsJson)[slotIndex]?.label ?? 'slot';
+  const slotLabel = parseSlotsJson(group.slotsJson)[slotIndex]?.label ?? 'Platz';
   await interaction.editReply({
-    content: ok ? `You ${result.switched ? 'switched to' : 'joined as'} ${formatClass(classId)} (${slotLabel} slot)` : GROUP_GONE_MESSAGE,
+    content: ok ? `Du ${result.switched ? 'hast gewechselt zu' : 'bist beigetreten als'} ${formatClass(classId)} (Platz ${slotLabel})` : GROUP_GONE_MESSAGE,
     components: [],
   });
   if (!ok) return;
 
   const userId = interaction.user.id;
   if (!result.switched && group.creatorId !== userId) {
-    await announce(interaction.client, group, `<@${group.creatorId}> <@${userId}> joined as ${formatClass(classId)} (${slotLabel}).`, [group.creatorId]);
+    await announce(interaction.client, group, `<@${group.creatorId}> <@${userId}> ist als ${formatClass(classId)} (${slotLabel}) beigetreten.`, [group.creatorId]);
   }
   if (result.becameFull) {
     const ids = result.members.map((m) => m.userId);
-    await announce(interaction.client, group, `${ids.map((id) => `<@${id}>`).join(' ')} Group is ready!`, ids);
+    await announce(interaction.client, group, `${ids.map((id) => `<@${id}>`).join(' ')} Die Gruppe ist bereit!`, ids);
   }
 });
 
@@ -127,13 +127,13 @@ registerGroupAction('leave', async (interaction, parsed) => {
   const repo = createGroupsRepo(getDb());
   const result = repo.leaveMember(Number(parsed.id), interaction.user.id);
   if (!result.ok) {
-    const message = { not_found: NOT_FOUND_MESSAGE, closed: CLOSED_MESSAGE, not_member: "You're not in this group." }[result.reason];
+    const message = { not_found: NOT_FOUND_MESSAGE, closed: CLOSED_MESSAGE, not_member: 'Du bist nicht in dieser Gruppe.' }[result.reason];
     return void (await interaction.reply(ephemeral(message)));
   }
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const ok = await refreshGroupPost(interaction.client, repo, result.group);
-  await interaction.editReply(ok ? 'You left the group.' : GROUP_GONE_MESSAGE);
+  await interaction.editReply(ok ? 'Du hast die Gruppe verlassen.' : GROUP_GONE_MESSAGE);
   if (ok && result.newCreatorId) {
-    await announce(interaction.client, result.group, `<@${result.newCreatorId}> is now the creator of this group.`, [result.newCreatorId]);
+    await announce(interaction.client, result.group, `<@${result.newCreatorId}> ist jetzt Ersteller dieser Gruppe.`, [result.newCreatorId]);
   }
 });

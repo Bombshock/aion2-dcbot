@@ -4,6 +4,8 @@ import { buildCustomId } from './router.js';
 
 export interface ClassPickerOptions {
   area: 'evt' | 'grp';
+  /** customId action; defaults to `pickclass`. */
+  action?: string;
   id: string | number;
   /** Class ids to offer; defaults to all classes. Unknown ids are ignored. */
   classIds?: readonly string[];
@@ -18,8 +20,8 @@ export function buildClassPicker(opts: ClassPickerOptions) {
   if (offered.length === 0) throw new Error('Class picker needs at least one class');
 
   const menu = new StringSelectMenuBuilder()
-    .setCustomId(buildCustomId(opts.area, 'pickclass', opts.id))
-    .setPlaceholder('Pick your class')
+    .setCustomId(buildCustomId(opts.area, opts.action ?? 'pickclass', opts.id))
+    .setPlaceholder('Wähle deine Klasse')
     .setMinValues(1)
     .setMaxValues(1)
     .addOptions(
@@ -33,7 +35,7 @@ export function buildClassPicker(opts: ClassPickerOptions) {
     );
 
   return {
-    content: 'Pick your class:',
+    content: 'Wähle deine Klasse:',
     components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)],
     ephemeral: true,
   };

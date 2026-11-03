@@ -6,32 +6,38 @@ import { applySchema } from '../db/schema.js';
 import {
   buildFooter,
   buildGroupEmbed,
-  buildSlotLines,
+  buildSlotColumns,
   checkCreateGroup,
   MAX_ACTIVE_GROUPS_PER_CREATOR,
   statusForFill,
   type GroupView,
 } from './groups.js';
-import { BUILTIN_TEMPLATES, serializeSlots } from './templates.js';
+import { parseTemplateText, serializeSlots, type TemplateSlot } from './templates.js';
 
-const dungeon = BUILTIN_TEMPLATES.find((t) => t.name === 'Dungeon (5)')!.slots;
+const dungeon = (parseTemplateText('Tank: tank\nHealer: healer\nDPS: dps\nDPS: dps\nAny: any') as { value: TemplateSlot[] }).value;
 
-describe('buildSlotLines', () => {
-  it('shows taken, open and any-class slots', () => {
-    const lines = buildSlotLines(dungeon, [{ userId: '1', classId: 'templar', slotIndex: 0 }]);
-    expect(lines[0]).toBe('1. Tank 🛡️ <@1> (Templar)');
-    expect(lines[1]).toBe('2. Healer — open (Cleric)');
-    expect(lines[2]).toBe('3. DPS — open (Assassin, Ranger, Sorcerer, Spiritmaster)');
-    expect(lines[4]).toBe('5. Any — open (any class)');
+describe('buildSlotColumns', () => {
+  it('groups slots by role with fill counts, class icon for players and "open" for free slots', () => {
+    const columns = buildSlotColumns(dungeon, [{ userId: '1', classId: 'templar', slotIndex: 0 }, { userId: '2', classId: 'ranger', slotIndex: 3 }]);
+    expect(columns).toEqual([
+      { name: '🛡️ Tanks (1/1)', lines: ['🛡️ <@1>'] },
+      { name: '💚 Heiler (0/1)', lines: ['frei'] },
+      { name: '⚔️ DPS (1/2)', lines: ['frei', '🏹 <@2>'] },
+      { name: '👤 Beliebig (0/1)', lines: ['frei'] },
+    ]);
+  });
+  it('puts slots spanning several roles under Any', () => {
+    expect(buildSlotColumns([{ label: 'Chanter', allowed: ['chanter'] }], [])).toEqual([{ name: '🎵 Support (0/1)', lines: ['frei'] }]);
+    expect(buildSlotColumns([{ label: 'Frontline', allowed: ['templar', 'gladiator', 'cleric'] }], [])[0]!.name).toBe('👤 Beliebig (0/1)');
   });
 });
 
 describe('buildFooter', () => {
   it('reports open and full groups', () => {
     const one = [{ userId: '1', classId: 'templar', slotIndex: 0 }];
-    expect(buildFooter(dungeon, one, 'open')).toBe('1/5 · open');
+    expect(buildFooter(dungeon, one, 'open')).toBe('1/5 · offen');
     const all = dungeon.map((_, i) => ({ userId: String(i), classId: 'templar', slotIndex: i }));
-    expect(buildFooter(dungeon, all, 'full')).toBe('5/5 · full ✅');
+    expect(buildFooter(dungeon, all, 'full')).toBe('5/5 · voll ✅');
   });
 });
 
@@ -44,10 +50,24 @@ describe('statusForFill', () => {
 });
 
 describe('buildGroupEmbed', () => {
+  const ZWSP = String.fromCharCode(0x200b);
   const group: GroupView = { id: 1, creatorId: '1', title: 'Run', description: 'Go', startsAt: null, status: 'open', slots: dungeon };
   it('says Now without a time and uses timestamps with one', () => {
-    expect(buildGroupEmbed(group, []).fields[0].value).toBe('Now');
+    expect(buildGroupEmbed(group, []).fields[0].value).toBe('Jetzt');
     expect(buildGroupEmbed({ ...group, startsAt: 100 }, []).fields[0].value).toBe('<t:100:F> (<t:100:R>)');
+  });
+  it('shows the role columns inline after a row break', () => {
+    const fields = buildGroupEmbed(group, []).fields;
+    expect(fields[2]).toEqual({ name: ZWSP, value: ZWSP });
+    expect(fields.slice(3).map((f) => [f.name, f.inline])).toEqual([
+      ['🛡️ Tanks (0/1)', true],
+      ['💚 Heiler (0/1)', true],
+      ['⚔️ DPS (0/2)', true],
+      ['👤 Beliebig (0/1)', true],
+    ]);
+  });
+  it('leaves out an empty description', () => {
+    expect(buildGroupEmbed({ ...group, description: '' }, [])).not.toHaveProperty('description');
   });
 });
 
@@ -64,7 +84,7 @@ describe('checkCreateGroup', () => {
 
   it('lists fitting classes when the class fits no slot', () => {
     const r = checkCreateGroup([{ label: 'Tank', allowed: ['templar', 'gladiator'] }], 'cleric', 0);
-    expect(r).toEqual({ ok: false, message: 'Your class fits no slot in this template. Fitting classes: Gladiator, Templar' });
+    expect(r).toEqual({ ok: false, message: 'Deine Klasse passt auf keinen Platz dieser Vorlage. Passende Klassen: Gladiator, Templar' });
   });
 
   it('refuses a 4th open group; closed groups do not count', () => {
@@ -74,7 +94,7 @@ describe('checkCreateGroup', () => {
     expect(repo.countActiveByCreator('g', 'u')).toBe(MAX_ACTIVE_GROUPS_PER_CREATOR);
     expect(checkCreateGroup(dungeon, 'templar', repo.countActiveByCreator('g', 'u'))).toEqual({
       ok: false,
-      message: 'You already have 3 open groups. Close one first.',
+      message: 'Du hast bereits 3 offene Gruppen. Schließe zuerst eine.',
     });
     repo.update(groups[0].id, { status: 'closed' });
     expect(checkCreateGroup(dungeon, 'templar', repo.countActiveByCreator('g', 'u')).ok).toBe(true);

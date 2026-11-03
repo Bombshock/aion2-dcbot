@@ -11,15 +11,15 @@ import { registerHandler, type ComponentInteraction, type ParsedCustomId } from 
 const DISCORD_UNKNOWN_CHANNEL = 10003;
 const DISCORD_UNKNOWN_MESSAGE = 10008;
 
-export const EVENT_GONE_MESSAGE = 'The event post was deleted, so the event is now marked as ended.';
-const NOT_FOUND_MESSAGE = 'This event no longer exists.';
-const DM_TIP = 'Tip: `/reminders dm` to also get a DM before the event.';
+export const EVENT_GONE_MESSAGE = 'Der Event-Post wurde gelöscht, daher ist das Event jetzt als beendet markiert.';
+const NOT_FOUND_MESSAGE = 'Dieses Event existiert nicht mehr.';
+const DM_TIP = 'Tipp: Mit `/reminders dm` bekommst du vor dem Event auch eine DM.';
 
 /** Why a sign-up is refused, or null when the event accepts changes. */
 export function signupRefusal(event: EventRecord | undefined, now: number): string | null {
   if (!event) return NOT_FOUND_MESSAGE;
-  if (event.status === 'cancelled') return 'This event was cancelled.';
-  if (event.status === 'ended' || event.startsAt <= now) return 'This event has already started.';
+  if (event.status === 'cancelled') return 'Dieses Event wurde abgesagt.';
+  if (event.status === 'ended' || event.startsAt <= now) return 'Dieses Event hat bereits begonnen.';
   return null;
 }
 
@@ -83,7 +83,7 @@ registerEventAction('pickclass', async (interaction, parsed) => {
   const repo = createEventsRepo(getDb());
   const event = repo.get(Number(parsed.id));
   const classId = interaction.values[0];
-  if (!classId || !getClass(classId)) return void (await interaction.update({ content: 'Unknown class.', components: [] }));
+  if (!classId || !getClass(classId)) return void (await interaction.update({ content: 'Unbekannte Klasse.', components: [] }));
   const refusal = signupRefusal(event, nowSeconds());
   if (refusal || !event) return void (await interaction.update({ content: refusal ?? NOT_FOUND_MESSAGE, components: [] }));
 
@@ -91,7 +91,7 @@ registerEventAction('pickclass', async (interaction, parsed) => {
   saveSignup(repo, event.id, interaction.user.id, classId);
   const ok = await refreshEventPost(interaction.client, repo, event);
   const tip = createUserSettingsRepo(getDb()).getDmReminders(interaction.user.id) ? '' : `\n${DM_TIP}`;
-  await interaction.editReply({ content: ok ? `Signed up as ${formatClass(classId)}${tip}` : EVENT_GONE_MESSAGE, components: [] });
+  await interaction.editReply({ content: ok ? `Angemeldet als ${formatClass(classId)}${tip}` : EVENT_GONE_MESSAGE, components: [] });
 });
 
 registerEventAction('leave', async (interaction, parsed) => {
@@ -100,11 +100,11 @@ registerEventAction('leave', async (interaction, parsed) => {
   const event = repo.get(Number(parsed.id));
   const refusal = signupRefusal(event, nowSeconds());
   if (refusal || !event) return void (await interaction.reply(ephemeral(refusal ?? NOT_FOUND_MESSAGE)));
-  if (!repo.removeSignup(event.id, interaction.user.id)) return void (await interaction.reply(ephemeral("You're not signed up.")));
+  if (!repo.removeSignup(event.id, interaction.user.id)) return void (await interaction.reply(ephemeral('Du bist nicht angemeldet.')));
 
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const ok = await refreshEventPost(interaction.client, repo, event);
-  await interaction.editReply(ok ? 'You left the event.' : EVENT_GONE_MESSAGE);
+  await interaction.editReply(ok ? 'Du hast dich vom Event abgemeldet.' : EVENT_GONE_MESSAGE);
 });
 
 registerEventAction('roster', async (interaction, parsed) => {

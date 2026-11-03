@@ -1,6 +1,6 @@
 import { CLASSES, getClass, type Role } from './classes.js';
 
-export const MAX_SLOTS = 5;
+export const MAX_SLOTS = 20;
 export const MAX_LABEL_LENGTH = 20;
 export const MAX_TEMPLATE_NAME_LENGTH = 50;
 
@@ -34,22 +34,22 @@ export function expandClasses(spec: string): Result<string[]> {
     if (token === 'any') ALL_CLASS_IDS.forEach((id) => ids.add(id));
     else if ((ROLE_SHORTHANDS as readonly string[]).includes(token)) CLASSES.filter((c) => c.role === token).forEach((c) => ids.add(c.id));
     else if (getClass(token)) ids.add(token);
-    else return { ok: false, message: `Unknown class or role: ${token}` };
+    else return { ok: false, message: `Unbekannte Klasse oder Rolle: ${token}` };
   }
   return { ok: true, value: ALL_CLASS_IDS.filter((id) => ids.has(id)) };
 }
 
-/** 1–5 slots, each with a label and a non-empty list of known class ids. */
+/** 1–20 slots, each with a label and a non-empty list of known class ids. */
 export function validateSlots(slots: TemplateSlot[]): Result<TemplateSlot[]> {
-  if (slots.length < 1) return { ok: false, message: 'A template needs at least 1 slot.' };
-  if (slots.length > MAX_SLOTS) return { ok: false, message: `A template can have at most ${MAX_SLOTS} slots.` };
+  if (slots.length < 1) return { ok: false, message: 'Eine Vorlage braucht mindestens 1 Platz.' };
+  if (slots.length > MAX_SLOTS) return { ok: false, message: `Eine Vorlage kann höchstens ${MAX_SLOTS} Plätze haben.` };
   for (const [i, slot] of slots.entries()) {
     const n = i + 1;
-    if (!slot.label.trim()) return { ok: false, message: `Slot ${n} has no label.` };
-    if (slot.label.length > MAX_LABEL_LENGTH) return { ok: false, message: `Slot ${n}: labels can be at most ${MAX_LABEL_LENGTH} characters.` };
-    if (slot.allowed.length === 0) return { ok: false, message: `Slot ${n} allows no class.` };
+    if (!slot.label.trim()) return { ok: false, message: `Platz ${n} hat keine Bezeichnung.` };
+    if (slot.label.length > MAX_LABEL_LENGTH) return { ok: false, message: `Platz ${n}: Bezeichnungen dürfen höchstens ${MAX_LABEL_LENGTH} Zeichen lang sein.` };
+    if (slot.allowed.length === 0) return { ok: false, message: `Platz ${n} erlaubt keine Klasse.` };
     const unknown = slot.allowed.find((id) => !getClass(id));
-    if (unknown) return { ok: false, message: `Slot ${n}: unknown class ${unknown}` };
+    if (unknown) return { ok: false, message: `Platz ${n}: unbekannte Klasse ${unknown}` };
   }
   return { ok: true, value: slots };
 }
@@ -63,9 +63,9 @@ export function parseTemplateText(text: string): Result<TemplateSlot[]> {
   const slots: TemplateSlot[] = [];
   for (const [i, line] of lines.entries()) {
     const colon = line.indexOf(':');
-    if (colon < 0) return { ok: false, message: `Line ${i + 1}: write it as \`Label: classes\`, e.g. \`Heal: cleric, chanter\`.` };
+    if (colon < 0) return { ok: false, message: `Zeile ${i + 1}: schreibe sie als \`Bezeichnung: Klassen\`, z. B. \`Heal: cleric, chanter\`.` };
     const allowed = expandClasses(line.slice(colon + 1));
-    if (!allowed.ok) return { ok: false, message: `Line ${i + 1}: ${allowed.message}` };
+    if (!allowed.ok) return { ok: false, message: `Zeile ${i + 1}: ${allowed.message}` };
     slots.push({ label: line.slice(0, colon).trim(), allowed: allowed.value });
   }
   return validateSlots(slots);
@@ -94,25 +94,25 @@ export function assignSlot(slots: TemplateSlot[], members: readonly { slotIndex:
   return best;
 }
 
-/** `"Tank (Gladiator, Templar)"`; a slot allowing every class shows `"Any (any class)"`. */
+/** `"Tank (Gladiator, Templar)"`; a slot allowing every class shows `"Beliebig (jede Klasse)"`. */
 export function formatSlot(slot: TemplateSlot): string {
   const classes =
-    slot.allowed.length === ALL_CLASS_IDS.length ? 'any class' : slot.allowed.map((id) => getClass(id)?.name ?? id).join(', ');
+    slot.allowed.length === ALL_CLASS_IDS.length ? 'jede Klasse' : slot.allowed.map((id) => getClass(id)?.name ?? id).join(', ');
   return `${slot.label} (${classes})`;
 }
 
-/** `"**Duo (2)**: Any (any class) · Any (any class)"` */
+/** `"**Duo**: Beliebig (jede Klasse) · Beliebig (jede Klasse)"` */
 export function formatTemplate(t: TemplateDefinition): string {
   return `**${t.name}**: ${t.slots.map(formatSlot).join(' · ')}`;
 }
 
 /** The `/template list` text, cut to fit a 2000-character message. */
 export function formatTemplateList(builtins: TemplateDefinition[], custom: TemplateDefinition[], limit = 2000): string {
-  const lines = ['__Built-in__', ...builtins.map(formatTemplate), '', '__This server__'];
-  lines.push(...(custom.length > 0 ? custom.map(formatTemplate) : ['No custom templates yet. Create one with `/template create`.']));
+  const lines = ['__Eingebaut__', ...builtins.map(formatTemplate), '', '__Dieser Server__'];
+  lines.push(...(custom.length > 0 ? custom.map(formatTemplate) : ['Noch keine eigenen Vorlagen. Erstelle eine mit `/template create`.']));
   const text = lines.join('\n');
   if (text.length <= limit) return text;
-  const cut = '\n… (list cut short)';
+  const cut = '\n… (Liste gekürzt)';
   return text.slice(0, text.lastIndexOf('\n', limit - cut.length)) + cut;
 }
 
@@ -122,10 +122,16 @@ const slot = (label: string, spec: string): TemplateSlot => {
   return { label, allowed: allowed.value };
 };
 
+/** Tanks, then healers, then "Beliebig" slots open to every class that is neither tank nor healer. */
+const party = (tanks: number, healers: number, any: number): TemplateSlot[] => [
+  ...Array.from({ length: tanks }, () => slot('Tank', 'tank')),
+  ...Array.from({ length: healers }, () => slot('Heiler', 'healer')),
+  ...Array.from({ length: any }, () => slot('Beliebig', 'dps, support')),
+];
+
 /** Built-in templates (guild_id NULL in the DB), available on every server. */
 export const BUILTIN_TEMPLATES: readonly TemplateDefinition[] = [
-  { name: 'Dungeon (5)', slots: [slot('Tank', 'tank'), slot('Healer', 'healer'), slot('DPS', 'dps'), slot('DPS', 'dps'), slot('Any', 'any')] },
-  { name: 'Small group (3)', slots: [slot('Any', 'any'), slot('Any', 'any'), slot('Any', 'any')] },
-  { name: 'Duo (2)', slots: [slot('Any', 'any'), slot('Any', 'any')] },
-  { name: 'Open (5)', slots: Array.from({ length: 5 }, () => slot('Any', 'any')) },
+  { name: 'Dungeon (5)', slots: party(1, 1, 3) },
+  { name: 'Abyss (20)', slots: party(4, 4, 12) },
+  { name: 'Raid (10)', slots: party(2, 2, 6) },
 ];

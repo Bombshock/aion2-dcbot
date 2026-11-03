@@ -11,11 +11,11 @@ export function renderGroupMessage(group: GroupView, members: readonly GroupMemb
   const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(buildCustomId(GROUP_AREA, 'join', group.id))
-      .setLabel('Join')
+      .setLabel('Beitreten')
       .setStyle(ButtonStyle.Success)
       .setDisabled(group.status !== 'open'),
-    new ButtonBuilder().setCustomId(buildCustomId(GROUP_AREA, 'leave', group.id)).setLabel('Leave').setStyle(ButtonStyle.Secondary).setDisabled(closed),
-    new ButtonBuilder().setCustomId(buildCustomId(GROUP_AREA, 'manage', group.id)).setLabel('Manage').setStyle(ButtonStyle.Primary).setDisabled(closed),
+    new ButtonBuilder().setCustomId(buildCustomId(GROUP_AREA, 'leave', group.id)).setLabel('Verlassen').setStyle(ButtonStyle.Secondary).setDisabled(closed),
+    new ButtonBuilder().setCustomId(buildCustomId(GROUP_AREA, 'manage', group.id)).setLabel('Verwalten').setStyle(ButtonStyle.Primary).setDisabled(closed),
   );
   return { embeds: [embed], components: [buttons] };
 }

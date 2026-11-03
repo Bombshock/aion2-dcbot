@@ -7,7 +7,7 @@ import {
   type ModalSubmitInteraction,
 } from 'discord.js';
 import type { Command } from './index.js';
-import { parseFutureDateTime } from '../domain/datetime.js';
+import { formatLocalDateTime, parseFutureDateTime } from '../domain/datetime.js';
 import { createEventsRepo } from '../db/events.js';
 import { getDb } from '../db/instance.js';
 import { buildEventModal, EVENT_FIELD as FIELD } from '../interactions/eventModal.js';
@@ -21,7 +21,7 @@ const data = new SlashCommandBuilder()
   .setName('event')
   .setDescription('Events')
   .setDMPermission(false)
-  .addSubcommand((s) => s.setName('create').setDescription('Create an event'));
+  .addSubcommand((s) => s.setName('create').setDescription('Ein Event erstellen'));
 
 const reply = (i: ChatInputCommandInteraction | ModalSubmitInteraction, content: string) =>
   i.reply({ content, flags: MessageFlags.Ephemeral });
@@ -33,11 +33,11 @@ function canCreateEvents(member: GuildMember | null, organizerRoleId: string | n
   return !!organizerRoleId && member.roles.cache.has(organizerRoleId);
 }
 
-const NOT_ALLOWED = 'You need the Manage Server permission or the organizer role to create events.';
+const NOT_ALLOWED = 'Du brauchst die Berechtigung „Server verwalten“ oder die Organisator-Rolle, um Events zu erstellen.';
 
 async function submit(i: ModalSubmitInteraction) {
   const guild = i.guild;
-  if (!guild) return reply(i, 'This command only works in a server.');
+  if (!guild) return reply(i, 'Dieser Befehl funktioniert nur auf einem Server.');
 
   const title = i.fields.getTextInputValue(FIELD.title).trim();
   const description = i.fields.getTextInputValue(FIELD.description).trim();
@@ -54,12 +54,12 @@ async function submit(i: ModalSubmitInteraction) {
     // Echo the typed values so the user can copy them into a new attempt.
     const text = [
       parsed.message,
-      `Dates are read in ${settings.timezone}.`,
+      `Daten werden in ${settings.timezone} gelesen.`,
       '',
-      'Your input:',
-      `Title: ${title}`,
-      `Date & time: ${when}`,
-      `Description:\n${description}`,
+      'Deine Eingabe:',
+      `Titel: ${title}`,
+      `Datum & Uhrzeit: ${when}`,
+      `Beschreibung:\n${description}`,
     ].join('\n');
     return reply(i, text.slice(0, 2000));
   }
@@ -80,10 +80,10 @@ async function submit(i: ModalSubmitInteraction) {
   } catch (err) {
     repo.delete(event.id);
     console.error('Posting event failed', err);
-    await i.editReply(`I couldn't post in <#${channel.id}>. Check my permissions there.`);
+    await i.editReply(`Ich konnte nicht in <#${channel.id}> posten. Prüfe dort meine Berechtigungen.`);
     return;
   }
-  await i.editReply(`Event created in <#${channel.id}>.`);
+  await i.editReply(`Event in <#${channel.id}> erstellt.`);
 }
 
 registerHandler(CREATE_AREA, async (interaction) => {
@@ -94,13 +94,16 @@ export const event: Command = {
   data,
   async execute(interaction) {
     const guild = interaction.guild;
-    if (!guild) return reply(interaction, 'This command only works in a server.');
+    if (!guild) return reply(interaction, 'Dieser Befehl funktioniert nur auf einem Server.');
     switch (interaction.options.getSubcommand()) {
       case 'create': {
         const settings = getGuildSettings(guild.id);
         if (!canCreateEvents(interaction.member as GuildMember | null, settings.organizerRoleId)) return reply(interaction, NOT_ALLOWED);
         if (!settings.eventsChannelId) return reply(interaction, SETUP_REQUIRED_MESSAGE);
-        return interaction.showModal(buildEventModal(buildCustomId(CREATE_AREA, 'submit'), 'Create event'));
+        // Prefill today's date (guild timezone) with the next full hour so only the time usually needs adjusting.
+        const nextHour = Math.ceil(Date.now() / 3_600_000) * 3600;
+        const when = formatLocalDateTime(nextHour, settings.timezone);
+        return interaction.showModal(buildEventModal(buildCustomId(CREATE_AREA, 'submit'), 'Event erstellen', { when }));
       }
     }
   },

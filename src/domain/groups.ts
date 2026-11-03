@@ -1,4 +1,4 @@
-import { CLASSES, getClass } from './classes.js';
+import { CLASSES, getClass, MIXED_ROLE_EMOJI, ROLE_EMOJI, ROLES, UNKNOWN_ROLE_EMOJI, type Role } from './classes.js';
 import { assignSlot, type Result, type TemplateSlot } from './templates.js';
 
 /** Open or full groups one creator may have at the same time in a guild. */
@@ -24,7 +24,8 @@ export interface GroupMemberView {
 
 export interface GroupEmbedData {
   title: string;
-  description: string;
+  /** Omitted when the group has no description: Discord rejects empty embed descriptions. */
+  description?: string;
   color: number;
   fields: { name: string; value: string; inline?: boolean }[];
   footer: { text: string };
@@ -40,11 +41,11 @@ export function fittingClasses(slots: readonly TemplateSlot[]): string[] {
 /** Slot index the creator takes, or the message to show instead of creating the group. */
 export function checkCreateGroup(slots: TemplateSlot[], classId: string, activeGroups: number): Result<number> {
   if (activeGroups >= MAX_ACTIVE_GROUPS_PER_CREATOR) {
-    return { ok: false, message: `You already have ${MAX_ACTIVE_GROUPS_PER_CREATOR} open groups. Close one first.` };
+    return { ok: false, message: `Du hast bereits ${MAX_ACTIVE_GROUPS_PER_CREATOR} offene Gruppen. Schließe zuerst eine.` };
   }
   const slot = assignSlot(slots, [], classId);
   if (slot === null) {
-    return { ok: false, message: `Your class fits no slot in this template. Fitting classes: ${fittingClasses(slots).join(', ')}` };
+    return { ok: false, message: `Deine Klasse passt auf keinen Platz dieser Vorlage. Passende Klassen: ${fittingClasses(slots).join(', ')}` };
   }
   return { ok: true, value: slot };
 }
@@ -60,39 +61,53 @@ export function statusForFill(slots: readonly TemplateSlot[], members: readonly 
   return members.length >= slots.length ? 'full' : 'open';
 }
 
-function allowedText(slot: TemplateSlot): string {
-  return slot.allowed.length === CLASSES.length ? 'any class' : slot.allowed.map((id) => getClass(id)?.name ?? id).join(', ');
+/** The one role all of the slot's classes share, or null for slots open to several roles (e.g. "Any"). */
+function slotRole(slot: TemplateSlot): Role | null {
+  const roles = new Set(CLASSES.filter((c) => slot.allowed.includes(c.id)).map((c) => c.role));
+  const [role] = roles;
+  return roles.size === 1 && role ? role : null;
 }
 
-/** `"1. Tank 🛡️ <@1> (Templar)"` for a taken slot, `"2. Healer — open (Cleric)"` for a free one. */
-export function formatSlotLine(index: number, slot: TemplateSlot, member?: GroupMemberView): string {
-  const n = `${index + 1}.`;
-  if (!member) return `${n} ${slot.label} — open (${allowedText(slot)})`;
-  const cls = getClass(member.classId);
-  return `${n} ${slot.label} ${cls?.emoji ?? '❔'} <@${member.userId}> (${cls?.name ?? member.classId})`;
+/** `"🛡️ <@1>"` for a taken slot (class icon and player), `"frei"` for a free one. */
+export function formatSlotLine(member?: GroupMemberView): string {
+  return member ? `${getClass(member.classId)?.emoji ?? UNKNOWN_ROLE_EMOJI} <@${member.userId}>` : 'frei';
 }
 
-export function buildSlotLines(slots: readonly TemplateSlot[], members: readonly GroupMemberView[]): string[] {
-  return slots.map((slot, i) => formatSlotLine(i, slot, members.find((m) => m.slotIndex === i)));
+export interface SlotColumn {
+  name: string;
+  lines: string[];
 }
 
-/** `"1/5 · open"`, `"5/5 · full ✅"` or `"3/5 · 🔒 Closed"`. */
+/** Slots grouped by role (tanks, healers, DPS, support, then mixed "Any" slots), headed by icon, label and fill. */
+export function buildSlotColumns(slots: readonly TemplateSlot[], members: readonly GroupMemberView[]): SlotColumn[] {
+  const columns = [...ROLES.map((r) => ({ role: r.role as Role | null, label: r.label, emoji: ROLE_EMOJI[r.role] })), { role: null, label: 'Beliebig', emoji: MIXED_ROLE_EMOJI }];
+  return columns.flatMap(({ role, label, emoji }) => {
+    const taken = slots.map((slot, i) => ({ slot, member: members.find((m) => m.slotIndex === i) })).filter(({ slot }) => slotRole(slot) === role);
+    if (taken.length === 0) return [];
+    const filled = taken.filter((t) => t.member).length;
+    return [{ name: `${emoji} ${label} (${filled}/${taken.length})`, lines: taken.map((t) => formatSlotLine(t.member)) }];
+  });
+}
+
+/** `"1/5 · offen"`, `"5/5 · voll ✅"` or `"3/5 · 🔒 Geschlossen"`. */
 export function buildFooter(slots: readonly TemplateSlot[], members: readonly GroupMemberView[], status: GroupStatusView): string {
   const total = slots.length;
-  if (status === 'closed') return `${members.length}/${total} · 🔒 Closed`;
-  return status === 'full' ? `${total}/${total} · full ✅` : `${members.length}/${total} · open`;
+  if (status === 'closed') return `${members.length}/${total} · 🔒 Geschlossen`;
+  return status === 'full' ? `${total}/${total} · voll ✅` : `${members.length}/${total} · offen`;
 }
 
 export function buildGroupEmbed(group: GroupView, members: readonly GroupMemberView[]): GroupEmbedData {
-  const when = group.startsAt === null ? 'Now' : `<t:${group.startsAt}:F> (<t:${group.startsAt}:R>)`;
+  const when = group.startsAt === null ? 'Jetzt' : `<t:${group.startsAt}:F> (<t:${group.startsAt}:R>)`;
   return {
     title: group.title,
-    description: group.description,
+    ...(group.description ? { description: group.description } : {}),
     color: COLORS[group.status],
     fields: [
-      { name: 'When', value: when, inline: true },
-      { name: 'Creator', value: `<@${group.creatorId}>`, inline: true },
-      { name: 'Slots', value: buildSlotLines(group.slots, members).join('\n') },
+      { name: 'Wann', value: when, inline: true },
+      { name: 'Ersteller', value: `<@${group.creatorId}>`, inline: true },
+      // Empty full-width field ends the row above, so the role columns start on a row of their own.
+      { name: '\u200b', value: '\u200b' },
+      ...buildSlotColumns(group.slots, members).map((c) => ({ name: c.name, value: c.lines.join('\n'), inline: true })),
     ],
     footer: { text: buildFooter(group.slots, members, group.status) },
   };

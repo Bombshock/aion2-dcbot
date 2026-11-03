@@ -14,7 +14,7 @@ import {
 } from './templates.js';
 
 const ALL = CLASSES.map((c) => c.id);
-const dungeon = BUILTIN_TEMPLATES.find((t) => t.name === 'Dungeon (5)')!.slots;
+const dungeon = (parseTemplateText('Tank: tank\nHealer: healer\nDPS: dps\nDPS: dps\nAny: any') as { value: TemplateSlot[] }).value;
 
 describe('expandClasses', () => {
   it('expands role shorthands and any', () => {
@@ -28,7 +28,7 @@ describe('expandClasses', () => {
   });
 
   it('rejects unknown classes', () => {
-    expect(expandClasses('cleric, bard')).toEqual({ ok: false, message: 'Unknown class or role: bard' });
+    expect(expandClasses('cleric, bard')).toEqual({ ok: false, message: 'Unbekannte Klasse oder Rolle: bard' });
   });
 });
 
@@ -44,9 +44,9 @@ describe('parseTemplateText', () => {
     });
   });
 
-  it('rejects 6 slots', () => {
-    const r = parseTemplateText(Array.from({ length: 6 }, () => 'Any: any').join('\n'));
-    expect(r).toEqual({ ok: false, message: 'A template can have at most 5 slots.' });
+  it('rejects 21 slots', () => {
+    const r = parseTemplateText(Array.from({ length: 21 }, () => 'Any: any').join('\n'));
+    expect(r).toEqual({ ok: false, message: 'Eine Vorlage kann höchstens 20 Plätze haben.' });
   });
 
   it('rejects empty input', () => {
@@ -54,26 +54,26 @@ describe('parseTemplateText', () => {
   });
 
   it('rejects an unknown class with its line number', () => {
-    expect(parseTemplateText('Tank: tank\nHeal: druid')).toEqual({ ok: false, message: 'Line 2: Unknown class or role: druid' });
+    expect(parseTemplateText('Tank: tank\nHeal: druid')).toEqual({ ok: false, message: 'Zeile 2: Unbekannte Klasse oder Rolle: druid' });
   });
 
   it('rejects lines without a colon, empty labels and empty class lists', () => {
     expect(parseTemplateText('tank')).toMatchObject({ ok: false });
-    expect(parseTemplateText(': tank')).toEqual({ ok: false, message: 'Slot 1 has no label.' });
-    expect(parseTemplateText('Tank:')).toEqual({ ok: false, message: 'Slot 1 allows no class.' });
+    expect(parseTemplateText(': tank')).toEqual({ ok: false, message: 'Platz 1 hat keine Bezeichnung.' });
+    expect(parseTemplateText('Tank:')).toEqual({ ok: false, message: 'Platz 1 erlaubt keine Klasse.' });
   });
 });
 
 describe('validateSlots', () => {
-  it('accepts 1 to 5 slots', () => {
+  it('accepts 1 to 20 slots', () => {
     expect(validateSlots([{ label: 'Any', allowed: ['cleric'] }]).ok).toBe(true);
-    expect(validateSlots(dungeon).ok).toBe(true);
+    expect(validateSlots([...dungeon, ...dungeon, ...dungeon, ...dungeon]).ok).toBe(true);
   });
 
-  it('rejects 0 and 6 slots, unknown class ids and empty allowed lists', () => {
+  it('rejects 0 and 21 slots, unknown class ids and empty allowed lists', () => {
     expect(validateSlots([]).ok).toBe(false);
-    expect(validateSlots([...dungeon, dungeon[0]]).ok).toBe(false);
-    expect(validateSlots([{ label: 'X', allowed: ['bard'] }])).toEqual({ ok: false, message: 'Slot 1: unknown class bard' });
+    expect(validateSlots([...dungeon, ...dungeon, ...dungeon, ...dungeon, dungeon[0]]).ok).toBe(false);
+    expect(validateSlots([{ label: 'X', allowed: ['bard'] }])).toEqual({ ok: false, message: 'Platz 1: unbekannte Klasse bard' });
     expect(validateSlots([{ label: 'X', allowed: [] }]).ok).toBe(false);
   });
 });
@@ -106,13 +106,22 @@ describe('assignSlot', () => {
 });
 
 describe('built-in templates', () => {
-  it('are valid and match the ticket', () => {
+  it('are valid and have the agreed tank / healer / any split', () => {
     for (const t of BUILTIN_TEMPLATES) expect(validateSlots(t.slots).ok).toBe(true);
-    expect(BUILTIN_TEMPLATES.map((t) => [t.name, t.slots.map((s) => s.label).join(' · ')])).toEqual([
-      ['Dungeon (5)', 'Tank · Healer · DPS · DPS · Any'],
-      ['Small group (3)', 'Any · Any · Any'],
-      ['Duo (2)', 'Any · Any'],
-      ['Open (5)', 'Any · Any · Any · Any · Any'],
+    const count = (slots: TemplateSlot[], label: string) => slots.filter((s) => s.label === label).length;
+    expect(BUILTIN_TEMPLATES.map((t) => [t.name, count(t.slots, 'Tank'), count(t.slots, 'Heiler'), count(t.slots, 'Beliebig'), t.slots.length])).toEqual([
+      ['Dungeon (5)', 1, 1, 3, 5],
+      ['Abyss (20)', 4, 4, 12, 20],
+      ['Raid (10)', 2, 2, 6, 10],
+    ]);
+  });
+
+  it('take Gladiator and Templar as tanks, only Cleric as healer and every other class for Any', () => {
+    const allowed = BUILTIN_TEMPLATES[0]!.slots.map((s) => s.allowed);
+    expect(allowed).toEqual([
+      ['gladiator', 'templar'],
+      ['cleric'],
+      ...Array.from({ length: 3 }, () => ['assassin', 'ranger', 'sorcerer', 'spiritmaster', 'chanter']),
     ]);
   });
 
@@ -124,13 +133,13 @@ describe('built-in templates', () => {
 describe('formatting', () => {
   it('formats a slot, showing "any class" for all classes', () => {
     expect(formatSlot(dungeon[0])).toBe('Tank (Gladiator, Templar)');
-    expect(formatSlot(dungeon[4])).toBe('Any (any class)');
+    expect(formatSlot(dungeon[4])).toBe('Any (jede Klasse)');
   });
 
   it('lists built-in and custom templates', () => {
     const text = formatTemplateList([{ name: 'Duo (2)', slots: dungeon.slice(4).concat(dungeon[4]) }], []);
     expect(text).toBe(
-      '__Built-in__\n**Duo (2)**: Any (any class) · Any (any class)\n\n__This server__\nNo custom templates yet. Create one with `/template create`.',
+      '__Eingebaut__\n**Duo (2)**: Any (jede Klasse) · Any (jede Klasse)\n\n__Dieser Server__\nNoch keine eigenen Vorlagen. Erstelle eine mit `/template create`.',
     );
   });
 
@@ -138,6 +147,6 @@ describe('formatting', () => {
     const custom = Array.from({ length: 50 }, (_, i) => ({ name: `T${i}`, slots: dungeon }));
     const text = formatTemplateList([], custom);
     expect(text.length).toBeLessThanOrEqual(2000);
-    expect(text.endsWith('… (list cut short)')).toBe(true);
+    expect(text.endsWith('… (Liste gekürzt)')).toBe(true);
   });
 });

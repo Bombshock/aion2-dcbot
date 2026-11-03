@@ -17,6 +17,22 @@ describe('schema', () => {
   it('is idempotent', () => {
     expect(() => applySchema(db)).not.toThrow();
   });
+
+  it('adds columns missing from databases created by older versions', () => {
+    const old = openDb(':memory:');
+    old.exec(`CREATE TABLE events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, message_id TEXT,
+      creator_id TEXT NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', starts_at INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open', created_at INTEGER NOT NULL);
+    CREATE TABLE groups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, message_id TEXT,
+      creator_id TEXT NOT NULL, template_id INTEGER, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+      starts_at INTEGER, status TEXT NOT NULL DEFAULT 'open', created_at INTEGER NOT NULL)`);
+    applySchema(old);
+    const columns = (table: string) => (old.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
+    expect(columns('events')).toContain('reminded_at');
+    expect(columns('groups')).toContain('slots_json');
+  });
 });
 
 describe('guild settings', () => {
@@ -113,6 +129,20 @@ describe('group templates', () => {
     expect(repo.listForGuild('g1').map((t) => [t.guildId, t.name, t.slotsJson])).toEqual([
       [null, 'Duo (2)', '[2]'],
       [null, 'Open (5)', '[5]'],
+    ]);
+  });
+
+  it('deletes built-ins no longer listed but keeps server templates', () => {
+    const repo = createGroupTemplatesRepo(db);
+    repo.create({ guildId: 'g1', name: 'Duo (2)', slotsJson: '[0]' });
+    repo.syncBuiltins([
+      { name: 'Duo (2)', slotsJson: '[2]' },
+      { name: 'Open (5)', slotsJson: '[5]' },
+    ]);
+    repo.syncBuiltins([{ name: 'Open (5)', slotsJson: '[5]' }]);
+    expect(repo.listForGuild('g1').map((t) => [t.guildId, t.name])).toEqual([
+      ['g1', 'Duo (2)'],
+      [null, 'Open (5)'],
     ]);
   });
 });

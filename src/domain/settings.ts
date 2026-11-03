@@ -15,9 +15,9 @@ export const TIMEZONE_SUGGESTIONS = [
   'Australia/Sydney',
 ] as const;
 
-export const SETUP_REQUIRED_MESSAGE = 'Ask an admin to run /setup first';
-export const BOTH_CHANNELS_MESSAGE = 'Set both channels the first time';
-export const CHANNELS_USAGE_MESSAGE = 'Usage: `/setup channels events:<#channel> groups:<#channel>` - give at least one channel.';
+export const SETUP_REQUIRED_MESSAGE = 'Bitte einen Admin, zuerst /setup auszuführen';
+export const BOTH_CHANNELS_MESSAGE = 'Setze beim ersten Mal beide Kanäle';
+export const CHANNELS_USAGE_MESSAGE = 'Verwendung: `/setup channels events:<#kanal> groups:<#kanal>` – gib mindestens einen Kanal an.';
 
 export interface SettingsValues {
   eventsChannelId: string | null;
@@ -76,5 +76,5 @@ export function missingPermissions(has: (permission: ChannelPermissionName) => b
 }
 
 export function formatMissingPermissions(channelId: string, missing: readonly ChannelPermissionName[]): string {
-  return `I'm missing ${missing.join(', ')} in <#${channelId}>.`;
+  return `Mir fehlt ${missing.join(', ')} in <#${channelId}>.`;
 }

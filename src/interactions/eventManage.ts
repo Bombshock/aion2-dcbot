@@ -22,8 +22,8 @@ import { EVENT_AREA } from './eventMessage.js';
 import { refreshEventPost, registerEventAction, EVENT_GONE_MESSAGE } from './eventSignup.js';
 import { buildCustomId, type ComponentInteraction } from './router.js';
 
-const NOT_FOUND_MESSAGE = 'This event no longer exists.';
-export const MANAGE_REFUSED_MESSAGE = 'Only the organizer can manage this event.';
+const NOT_FOUND_MESSAGE = 'Dieses Event existiert nicht mehr.';
+export const MANAGE_REFUSED_MESSAGE = 'Nur der Organisator kann dieses Event verwalten.';
 const SELECT_LIMIT = 25;
 
 const ephemeral = (content: string) => ({ content, flags: MessageFlags.Ephemeral }) as const;
@@ -33,8 +33,8 @@ const nowSeconds = () => Math.floor(Date.now() / 1000);
 export function manageRefusal(event: EventRecord | undefined, userId: string, canManageGuild: boolean): string | null {
   if (!event) return NOT_FOUND_MESSAGE;
   if (event.creatorId !== userId && !canManageGuild) return MANAGE_REFUSED_MESSAGE;
-  if (event.status === 'cancelled') return 'This event was cancelled.';
-  if (event.status === 'ended') return 'This event has already ended.';
+  if (event.status === 'cancelled') return 'Dieses Event wurde abgesagt.';
+  if (event.status === 'ended') return 'Dieses Event ist bereits beendet.';
   return null;
 }
 
@@ -62,13 +62,13 @@ registerEventAction('manage', async (interaction, parsed) => {
   const button = (action: string, label: string, style: ButtonStyle) =>
     new ButtonBuilder().setCustomId(buildCustomId(EVENT_AREA, action, id)).setLabel(label).setStyle(style);
   await interaction.reply({
-    content: `Manage **${found.event.title}**`,
+    content: `**${found.event.title}** verwalten`,
     flags: MessageFlags.Ephemeral,
     components: [
       new ActionRowBuilder<ButtonBuilder>().addComponents(
-        button('edit', 'Edit', ButtonStyle.Primary),
-        button('remove', 'Remove participant', ButtonStyle.Secondary),
-        button('cancel', 'Cancel event', ButtonStyle.Danger),
+        button('edit', 'Bearbeiten', ButtonStyle.Primary),
+        button('remove', 'Teilnehmer entfernen', ButtonStyle.Secondary),
+        button('cancel', 'Event absagen', ButtonStyle.Danger),
       ),
     ],
   });
@@ -81,7 +81,7 @@ registerEventAction('edit', async (interaction, parsed) => {
   const { event } = found;
   const { timezone } = getGuildSettings(event.guildId);
   await interaction.showModal(
-    buildEventModal(buildCustomId(EVENT_AREA, 'editsubmit', event.id), 'Edit event', {
+    buildEventModal(buildCustomId(EVENT_AREA, 'editsubmit', event.id), 'Event bearbeiten', {
       title: event.title,
       description: event.description,
       when: formatLocalDateTime(event.startsAt, timezone),
@@ -119,7 +119,7 @@ registerEventAction('editsubmit', async (interaction, parsed) => {
   const unchanged = when === formatLocalDateTime(event.startsAt, timezone);
   const parsedTime = unchanged ? ({ ok: true, epochSeconds: event.startsAt } as const) : parseFutureDateTime(when, timezone, nowSeconds());
   if (!parsedTime.ok) {
-    const text = [parsedTime.message, `Dates are read in ${timezone}.`, '', 'Your input:', `Title: ${title}`, `Date & time: ${when}`, `Description:\n${description}`].join('\n');
+    const text = [parsedTime.message, `Daten werden in ${timezone} gelesen.`, '', 'Deine Eingabe:', `Titel: ${title}`, `Datum & Uhrzeit: ${when}`, `Beschreibung:\n${description}`].join('\n');
     return void (await interaction.reply(ephemeral(text.slice(0, 2000))));
   }
 
@@ -132,7 +132,7 @@ registerEventAction('editsubmit', async (interaction, parsed) => {
   if (!ok) return void (await interaction.editReply(EVENT_GONE_MESSAGE));
   const signedUp = repo.listSignups(event.id).map((s) => s.userId);
   if (updated.startsAt !== event.startsAt) await announceTimeChange(interaction.client, updated, signedUp);
-  await interaction.editReply('Event updated.');
+  await interaction.editReply('Event aktualisiert.');
 });
 
 registerEventAction('remove', async (interaction, parsed) => {
@@ -140,13 +140,13 @@ registerEventAction('remove', async (interaction, parsed) => {
   const found = await loadManagedEvent(interaction, parsed.id, updateMessage(interaction));
   if (!found) return;
   const signups = found.repo.listSignups(found.event.id);
-  if (signups.length === 0) return void (await interaction.update({ content: 'Nobody has signed up yet.', components: [] }));
+  if (signups.length === 0) return void (await interaction.update({ content: 'Es hat sich noch niemand angemeldet.', components: [] }));
 
   const customId = buildCustomId(EVENT_AREA, 'removepick', found.event.id);
   // A string select can list at most 25 options; larger rosters fall back to a user select that is checked on submit.
   if (signups.length > SELECT_LIMIT) {
-    const select = new UserSelectMenuBuilder().setCustomId(customId).setPlaceholder('Participant to remove');
-    return void (await interaction.update({ content: 'Pick the participant to remove.', components: [new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(select)] }));
+    const select = new UserSelectMenuBuilder().setCustomId(customId).setPlaceholder('Zu entfernender Teilnehmer');
+    return void (await interaction.update({ content: 'Wähle den Teilnehmer, der entfernt werden soll.', components: [new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(select)] }));
   }
   const names = new Map<string, string>();
   await Promise.all(
@@ -157,9 +157,9 @@ registerEventAction('remove', async (interaction, parsed) => {
   );
   const select = new StringSelectMenuBuilder()
     .setCustomId(customId)
-    .setPlaceholder('Participant to remove')
+    .setPlaceholder('Zu entfernender Teilnehmer')
     .addOptions(signups.map((s) => ({ label: (names.get(s.userId) ?? s.userId).slice(0, 100), description: formatClass(s.classId).slice(0, 100), value: s.userId })));
-  await interaction.update({ content: 'Pick the participant to remove.', components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)] });
+  await interaction.update({ content: 'Wähle den Teilnehmer, der entfernt werden soll.', components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)] });
 });
 
 registerEventAction('removepick', async (interaction, parsed) => {
@@ -168,11 +168,11 @@ registerEventAction('removepick', async (interaction, parsed) => {
   if (!found) return;
   const { repo, event } = found;
   const userId = interaction.values[0];
-  if (!userId || !repo.removeSignup(event.id, userId)) return void (await interaction.update({ content: 'That user is not signed up.', components: [] }));
+  if (!userId || !repo.removeSignup(event.id, userId)) return void (await interaction.update({ content: 'Dieser Nutzer ist nicht angemeldet.', components: [] }));
 
   await interaction.deferUpdate();
   const ok = await refreshEventPost(interaction.client, repo, event);
-  await interaction.editReply({ content: ok ? `Removed <@${userId}> from the event.` : EVENT_GONE_MESSAGE, components: [] });
+  await interaction.editReply({ content: ok ? `<@${userId}> wurde aus dem Event entfernt.` : EVENT_GONE_MESSAGE, components: [] });
 });
 
 registerEventAction('cancel', async (interaction, parsed) => {
@@ -182,14 +182,14 @@ registerEventAction('cancel', async (interaction, parsed) => {
   const button = (action: string, label: string, style: ButtonStyle) =>
     new ButtonBuilder().setCustomId(buildCustomId(EVENT_AREA, action, found.event.id)).setLabel(label).setStyle(style);
   await interaction.update({
-    content: `Cancel **${found.event.title}**? This can't be undone.`,
-    components: [new ActionRowBuilder<ButtonBuilder>().addComponents(button('cancelconfirm', 'Yes, cancel event', ButtonStyle.Danger), button('cancelabort', 'Keep event', ButtonStyle.Secondary))],
+    content: `**${found.event.title}** absagen? Das kann nicht rückgängig gemacht werden.`,
+    components: [new ActionRowBuilder<ButtonBuilder>().addComponents(button('cancelconfirm', 'Ja, Event absagen', ButtonStyle.Danger), button('cancelabort', 'Event behalten', ButtonStyle.Secondary))],
   });
 });
 
 registerEventAction('cancelabort', async (interaction) => {
   if (!interaction.isButton()) return;
-  await interaction.update({ content: 'The event was kept.', components: [] });
+  await interaction.update({ content: 'Das Event wurde behalten.', components: [] });
 });
 
 registerEventAction('cancelconfirm', async (interaction, parsed) => {
@@ -200,5 +200,5 @@ registerEventAction('cancelconfirm', async (interaction, parsed) => {
   await interaction.deferUpdate();
   const updated = repo.update(found.event.id, { status: 'cancelled' });
   const ok = updated ? await refreshEventPost(interaction.client, repo, updated) : false;
-  await interaction.editReply({ content: ok ? 'The event was cancelled.' : EVENT_GONE_MESSAGE, components: [] });
+  await interaction.editReply({ content: ok ? 'Das Event wurde abgesagt.' : EVENT_GONE_MESSAGE, components: [] });
 });

@@ -25,10 +25,10 @@ describe('saveSignup', () => {
 describe('signupRefusal', () => {
   it('refuses missing, cancelled, ended and started events', () => {
     const { event } = setup();
-    expect(signupRefusal(undefined, 1000)).toMatch(/no longer exists/);
-    expect(signupRefusal({ ...event, status: 'cancelled' }, 1000)).toMatch(/cancelled/);
-    expect(signupRefusal({ ...event, status: 'ended' }, 1000)).toMatch(/started/);
-    expect(signupRefusal(event, 2000)).toMatch(/started/);
+    expect(signupRefusal(undefined, 1000)).toMatch(/existiert nicht mehr/);
+    expect(signupRefusal({ ...event, status: 'cancelled' }, 1000)).toMatch(/abgesagt/);
+    expect(signupRefusal({ ...event, status: 'ended' }, 1000)).toMatch(/begonnen/);
+    expect(signupRefusal(event, 2000)).toMatch(/begonnen/);
     expect(signupRefusal(event, 1000)).toBeNull();
   });
 });

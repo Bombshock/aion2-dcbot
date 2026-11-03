@@ -21,8 +21,8 @@ describe('manageRefusal', () => {
   });
   it('refuses missing, cancelled and ended events', () => {
     const event = setup();
-    expect(manageRefusal(undefined, 'owner', true)).toMatch(/no longer exists/);
-    expect(manageRefusal({ ...event, status: 'cancelled' }, 'owner', true)).toMatch(/cancelled/);
-    expect(manageRefusal({ ...event, status: 'ended' }, 'owner', true)).toMatch(/ended/);
+    expect(manageRefusal(undefined, 'owner', true)).toMatch(/existiert nicht mehr/);
+    expect(manageRefusal({ ...event, status: 'cancelled' }, 'owner', true)).toMatch(/abgesagt/);
+    expect(manageRefusal({ ...event, status: 'ended' }, 'owner', true)).toMatch(/beendet/);
   });
 });

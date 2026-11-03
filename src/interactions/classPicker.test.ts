@@ -11,7 +11,7 @@ describe('buildClassPicker', () => {
     const menu = menuOf(reply);
     expect(reply.ephemeral).toBe(true);
     expect(menu.custom_id).toBe('evt:pickclass:42');
-    expect(menu.placeholder).toBe('Pick your class');
+    expect(menu.placeholder).toBe('Wähle deine Klasse');
     expect(menu.min_values).toBe(1);
     expect(menu.max_values).toBe(1);
     expect(menu.options).toHaveLength(8);
@@ -34,5 +34,8 @@ describe('buildClassPicker', () => {
 
   it('throws on an empty subset', () => {
     expect(() => buildClassPicker({ area: 'grp', id: 1, classIds: [] })).toThrow();
+  });
+  it('uses a custom action when given', () => {
+    expect(menuOf(buildClassPicker({ area: 'grp', action: 'newclass', id: 7 })).custom_id).toBe('grp:newclass:7');
   });
 });

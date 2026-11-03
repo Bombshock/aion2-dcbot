@@ -12,14 +12,14 @@ import {
 import { createGroupsRepo, type GroupRecord } from '../db/groups.js';
 import { getDb } from '../db/instance.js';
 import { formatClass } from '../domain/classes.js';
-import { DATE_FORMAT_HINT, formatLocalDateTime, parseFutureDateTime } from '../domain/datetime.js';
+import { DATE_FORMAT_HINT, DATE_PLACEHOLDER, formatLocalDateTime, parseFutureDateTime } from '../domain/datetime.js';
 import { getGuildSettings } from '../settings.js';
 import { GROUP_AREA } from './groupMessage.js';
 import { closeGroup, GROUP_GONE_MESSAGE, refreshGroupPost, registerGroupAction } from './groupJoin.js';
 import { buildCustomId, type ComponentInteraction } from './router.js';
 
-const NOT_FOUND_MESSAGE = 'This group no longer exists.';
-export const GROUP_MANAGE_REFUSED_MESSAGE = 'Only the group creator can manage this group.';
+const NOT_FOUND_MESSAGE = 'Diese Gruppe existiert nicht mehr.';
+export const GROUP_MANAGE_REFUSED_MESSAGE = 'Nur der Ersteller kann diese Gruppe verwalten.';
 const FIELD = { title: 'title', description: 'description', when: 'when' } as const;
 
 const ephemeral = (content: string) => ({ content, flags: MessageFlags.Ephemeral }) as const;
@@ -29,7 +29,7 @@ const nowSeconds = () => Math.floor(Date.now() / 1000);
 export function groupManageRefusal(group: GroupRecord | undefined, userId: string, canManageGuild: boolean): string | null {
   if (!group) return NOT_FOUND_MESSAGE;
   if (group.creatorId !== userId && !canManageGuild) return GROUP_MANAGE_REFUSED_MESSAGE;
-  if (group.status === 'closed') return 'This group is closed.';
+  if (group.status === 'closed') return 'Diese Gruppe ist geschlossen.';
   return null;
 }
 
@@ -56,13 +56,13 @@ registerGroupAction('manage', async (interaction, parsed) => {
   if (!found) return;
   const id = found.group.id;
   await interaction.reply({
-    content: `Manage **${found.group.title}**`,
+    content: `**${found.group.title}** verwalten`,
     flags: MessageFlags.Ephemeral,
     components: [
       new ActionRowBuilder<ButtonBuilder>().addComponents(
-        button('edit', 'Edit', ButtonStyle.Primary, id),
-        button('kick', 'Kick member', ButtonStyle.Secondary, id),
-        button('close', 'Close group', ButtonStyle.Danger, id),
+        button('edit', 'Bearbeiten', ButtonStyle.Primary, id),
+        button('kick', 'Mitglied entfernen', ButtonStyle.Secondary, id),
+        button('close', 'Gruppe schließen', ButtonStyle.Danger, id),
       ),
     ],
   });
@@ -79,12 +79,12 @@ registerGroupAction('edit', async (interaction, parsed) => {
   await interaction.showModal(
     new ModalBuilder()
       .setCustomId(buildCustomId(GROUP_AREA, 'editsubmit', group.id))
-      .setTitle('Edit group')
+      .setTitle('Gruppe bearbeiten')
       .addComponents(
-        row(prefill(new TextInputBuilder().setCustomId(FIELD.title).setLabel('Title').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(100), group.title)),
+        row(prefill(new TextInputBuilder().setCustomId(FIELD.title).setLabel('Titel').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(100), group.title)),
         row(
           prefill(
-            new TextInputBuilder().setCustomId(FIELD.description).setLabel('Description').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(2000),
+            new TextInputBuilder().setCustomId(FIELD.description).setLabel('Beschreibung').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(2000),
             group.description,
           ),
         ),
@@ -92,10 +92,10 @@ registerGroupAction('edit', async (interaction, parsed) => {
           prefill(
             new TextInputBuilder()
               .setCustomId(FIELD.when)
-              .setLabel(`When (${DATE_FORMAT_HINT}, empty = now)`)
+              .setLabel(`Wann (${DATE_FORMAT_HINT}, leer = jetzt)`)
               .setStyle(TextInputStyle.Short)
               .setRequired(false)
-              .setPlaceholder('2030-01-31 20:00')
+              .setPlaceholder(DATE_PLACEHOLDER)
               .setMaxLength(16),
             group.startsAt === null ? '' : formatLocalDateTime(group.startsAt, timezone),
           ),
@@ -121,7 +121,7 @@ registerGroupAction('editsubmit', async (interaction, parsed) => {
     const unchanged = group.startsAt !== null && when === formatLocalDateTime(group.startsAt, timezone);
     const parsedTime = unchanged ? ({ ok: true, epochSeconds: group.startsAt! } as const) : parseFutureDateTime(when, timezone, nowSeconds());
     if (!parsedTime.ok) {
-      const text = [parsedTime.message, `Dates are read in ${timezone}.`, '', 'Your input:', `Title: ${title}`, `When: ${when}`, `Description:\n${description}`].join('\n');
+      const text = [parsedTime.message, `Daten werden in ${timezone} gelesen.`, '', 'Deine Eingabe:', `Titel: ${title}`, `Wann: ${when}`, `Beschreibung:\n${description}`].join('\n');
       return void (await interaction.reply(ephemeral(text.slice(0, 2000))));
     }
     startsAt = parsedTime.epochSeconds;
@@ -131,7 +131,7 @@ registerGroupAction('editsubmit', async (interaction, parsed) => {
   const updated = repo.update(group.id, { title, description, startsAt });
   if (!updated) return void (await interaction.editReply(NOT_FOUND_MESSAGE));
   const ok = await refreshGroupPost(interaction.client, repo, updated);
-  await interaction.editReply(ok ? 'Group updated.' : GROUP_GONE_MESSAGE);
+  await interaction.editReply(ok ? 'Gruppe aktualisiert.' : GROUP_GONE_MESSAGE);
 });
 
 registerGroupAction('kick', async (interaction, parsed) => {
@@ -140,7 +140,7 @@ registerGroupAction('kick', async (interaction, parsed) => {
   if (!found) return;
   const { repo, group } = found;
   const others = repo.listMembers(group.id).filter((m) => m.userId !== group.creatorId);
-  if (others.length === 0) return void (await interaction.update({ content: 'There is nobody to kick.', components: [] }));
+  if (others.length === 0) return void (await interaction.update({ content: 'Es gibt niemanden zum Entfernen.', components: [] }));
 
   const names = new Map<string, string>();
   await Promise.all(
@@ -151,9 +151,9 @@ registerGroupAction('kick', async (interaction, parsed) => {
   );
   const select = new StringSelectMenuBuilder()
     .setCustomId(buildCustomId(GROUP_AREA, 'kickpick', group.id))
-    .setPlaceholder('Member to kick')
+    .setPlaceholder('Zu entfernendes Mitglied')
     .addOptions(others.map((m) => ({ label: (names.get(m.userId) ?? m.userId).slice(0, 100), description: formatClass(m.classId).slice(0, 100), value: m.userId })));
-  await interaction.update({ content: 'Pick the member to kick.', components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)] });
+  await interaction.update({ content: 'Wähle das Mitglied, das entfernt werden soll.', components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)] });
 });
 
 registerGroupAction('kickpick', async (interaction, parsed) => {
@@ -166,15 +166,15 @@ registerGroupAction('kickpick', async (interaction, parsed) => {
   if (!result.ok) {
     const message = {
       not_found: NOT_FOUND_MESSAGE,
-      closed: 'This group is closed.',
-      creator: "The creator can't be kicked. Close the group or leave it instead.",
-      not_member: 'That user is not in the group.',
+      closed: 'Diese Gruppe ist geschlossen.',
+      creator: 'Der Ersteller kann nicht entfernt werden. Schließe oder verlasse die Gruppe stattdessen.',
+      not_member: 'Dieser Nutzer ist nicht in der Gruppe.',
     }[result.reason];
     return void (await interaction.update({ content: message, components: [] }));
   }
   await interaction.deferUpdate();
   const ok = await refreshGroupPost(interaction.client, repo, result.group);
-  await interaction.editReply({ content: ok ? `Removed <@${userId}> from the group.` : GROUP_GONE_MESSAGE, components: [] });
+  await interaction.editReply({ content: ok ? `<@${userId}> wurde aus der Gruppe entfernt.` : GROUP_GONE_MESSAGE, components: [] });
 });
 
 registerGroupAction('close', async (interaction, parsed) => {
@@ -183,16 +183,16 @@ registerGroupAction('close', async (interaction, parsed) => {
   if (!found) return;
   const id = found.group.id;
   await interaction.update({
-    content: `Close **${found.group.title}**? This can't be undone.`,
+    content: `**${found.group.title}** schließen? Das kann nicht rückgängig gemacht werden.`,
     components: [
-      new ActionRowBuilder<ButtonBuilder>().addComponents(button('closeconfirm', 'Yes, close group', ButtonStyle.Danger, id), button('closeabort', 'Keep group', ButtonStyle.Secondary, id)),
+      new ActionRowBuilder<ButtonBuilder>().addComponents(button('closeconfirm', 'Ja, Gruppe schließen', ButtonStyle.Danger, id), button('closeabort', 'Gruppe behalten', ButtonStyle.Secondary, id)),
     ],
   });
 });
 
 registerGroupAction('closeabort', async (interaction) => {
   if (!interaction.isButton()) return;
-  await interaction.update({ content: 'The group was kept.', components: [] });
+  await interaction.update({ content: 'Die Gruppe wurde behalten.', components: [] });
 });
 
 registerGroupAction('closeconfirm', async (interaction, parsed) => {
@@ -202,5 +202,5 @@ registerGroupAction('closeconfirm', async (interaction, parsed) => {
   const { repo } = found;
   await interaction.deferUpdate();
   const ok = await closeGroup(interaction.client, repo, found.group.id);
-  await interaction.editReply({ content: ok ? 'The group was closed.' : GROUP_GONE_MESSAGE, components: [] });
+  await interaction.editReply({ content: ok ? 'Die Gruppe wurde geschlossen.' : GROUP_GONE_MESSAGE, components: [] });
 });

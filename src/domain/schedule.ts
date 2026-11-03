@@ -10,7 +10,7 @@ const MESSAGE_LIMIT = 2000;
 
 /** Reminder text for an event; `link` points to the event post. */
 export function formatEventReminder(title: string, startsAt: number, link: string): string {
-  return `⏰ **${title}** starts <t:${startsAt}:R> — ${link}`.slice(0, MESSAGE_LIMIT);
+  return `⏰ **${title}** beginnt <t:${startsAt}:R> — ${link}`.slice(0, MESSAGE_LIMIT);
 }
 
 /** `header` followed by the mentions, split over as many messages of at most 2000 characters as needed. No users → no messages. */

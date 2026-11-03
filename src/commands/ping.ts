@@ -2,7 +2,7 @@ import { SlashCommandBuilder, type ChatInputCommandInteraction } from 'discord.j
 import type { Command } from './index.js';
 
 export const ping: Command = {
-  data: new SlashCommandBuilder().setName('ping').setDescription('Check that the bot is alive'),
+  data: new SlashCommandBuilder().setName('ping').setDescription('Prüft, ob der Bot läuft'),
   async execute(interaction: ChatInputCommandInteraction) {
     await interaction.reply({ content: 'Pong!', ephemeral: true });
   },

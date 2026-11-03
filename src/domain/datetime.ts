@@ -1,8 +1,9 @@
-export const DATE_FORMAT_HINT = 'YYYY-MM-DD HH:mm';
+export const DATE_FORMAT_HINT = 'TT.MM.JJJJ HH:mm';
+export const DATE_PLACEHOLDER = '31.01.2030 20:00';
 
 export type ParseResult = { ok: true; epochSeconds: number } | { ok: false; message: string };
 
-const PATTERN = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})$/;
+const PATTERN = /^(\d{1,2})\.(\d{1,2})\.(\d{4}) +(\d{1,2}):(\d{2})$/;
 
 /** Offset (ms) of `timeZone` from UTC at the given instant. */
 function zoneOffsetMs(utcMs: number, timeZone: string): number {
@@ -22,14 +23,14 @@ function zoneOffsetMs(utcMs: number, timeZone: string): number {
 }
 
 /**
- * Parses `YYYY-MM-DD HH:mm` as wall-clock time in `timeZone` and returns epoch seconds.
+ * Parses German `DD.MM.YYYY HH:mm` (day and month may be single-digit) as wall-clock time in `timeZone` and returns epoch seconds.
  * Rejects malformed or impossible dates (e.g. 2030-02-31) and local times skipped by a DST change.
  */
 export function parseLocalDateTime(input: string, timeZone: string): ParseResult {
-  const bad: ParseResult = { ok: false, message: `Couldn't read that date. Use the format ${DATE_FORMAT_HINT}.` };
+  const bad: ParseResult = { ok: false, message: `Dieses Datum konnte ich nicht lesen. Nutze das Format ${DATE_FORMAT_HINT}.` };
   const m = PATTERN.exec(input.trim());
   if (!m) return bad;
-  const [year, month, day, hour, minute] = m.slice(1).map(Number) as [number, number, number, number, number];
+  const [day, month, year, hour, minute] = m.slice(1).map(Number) as [number, number, number, number, number];
   const wallMs = Date.UTC(year, month - 1, day, hour, minute);
   const check = new Date(wallMs);
   if (
@@ -46,12 +47,12 @@ export function parseLocalDateTime(input: string, timeZone: string): ParseResult
   let utcMs = wallMs - zoneOffsetMs(wallMs, timeZone);
   utcMs = wallMs - zoneOffsetMs(utcMs, timeZone);
   if (utcMs + zoneOffsetMs(utcMs, timeZone) !== wallMs) {
-    return { ok: false, message: `That time doesn't exist in ${timeZone} (daylight saving change).` };
+    return { ok: false, message: `Diese Uhrzeit gibt es in ${timeZone} nicht (Zeitumstellung).` };
   }
   return { ok: true, epochSeconds: Math.floor(utcMs / 1000) };
 }
 
-/** Formats epoch seconds as `YYYY-MM-DD HH:mm` wall-clock time in `timeZone` (the inverse of `parseLocalDateTime`). */
+/** Formats epoch seconds as `DD.MM.YYYY HH:mm` wall-clock time in `timeZone` (the inverse of `parseLocalDateTime`). */
 export function formatLocalDateTime(epochSeconds: number, timeZone: string): string {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone,
@@ -63,12 +64,12 @@ export function formatLocalDateTime(epochSeconds: number, timeZone: string): str
     minute: '2-digit',
   }).formatToParts(new Date(epochSeconds * 1000));
   const get = (type: string) => parts.find((p) => p.type === type)!.value;
-  return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}`;
+  return `${get('day')}.${get('month')}.${get('year')} ${get('hour')}:${get('minute')}`;
 }
 
 /** Parses like `parseLocalDateTime` and additionally requires the moment to lie after `nowSeconds`. */
 export function parseFutureDateTime(input: string, timeZone: string, nowSeconds: number): ParseResult {
   const r = parseLocalDateTime(input, timeZone);
-  if (r.ok && r.epochSeconds <= nowSeconds) return { ok: false, message: 'That date is in the past.' };
+  if (r.ok && r.epochSeconds <= nowSeconds) return { ok: false, message: 'Dieses Datum liegt in der Vergangenheit.' };
   return r;
 }

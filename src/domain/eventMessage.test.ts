@@ -7,9 +7,12 @@ const event = { id: 1, creatorId: '99', title: 'Raid', description: 'Bring pots'
 const make = (n: number) =>
   Array.from({ length: n }, (_, i) => ({ userId: String(100000000000000000n + BigInt(i)), classId: CLASSES[i % CLASSES.length]!.id }));
 const embedSize = (e: ReturnType<typeof buildEventEmbed>) =>
-  e.title.length + e.description.length + e.fields.reduce((n, f) => n + f.name.length + f.value.length, 0);
+  e.title.length + (e.description?.length ?? 0) + e.fields.reduce((n, f) => n + f.name.length + f.value.length, 0);
 
 describe('buildEventEmbed', () => {
+  it('leaves out an empty description', () => {
+    expect(buildEventEmbed({ ...event, description: '' }, [])).not.toHaveProperty('description');
+  });
   it('shows title, description, timestamps, organizer and an empty roster', () => {
     const e = buildEventEmbed(event, []);
     expect(e.title).toBe('Raid');
@@ -26,12 +29,12 @@ describe('buildEventEmbed', () => {
       { userId: '2', classId: 'gladiator' },
       { userId: '3', classId: 'cleric' },
     ]);
-    expect(e.fields.map((f) => f.name)).toEqual(['When', 'Organizer', 'Tanks (2)', 'Healers (1)', 'Total']);
-    expect(e.fields.find((f) => f.name === 'Tanks (2)')!.value).toBe('⚔️ <@2> (Gladiator) · 🛡️ <@1> (Templar)');
-    expect(e.fields.find((f) => f.name === 'Total')!.value).toBe('3');
+    expect(e.fields.map((f) => f.name)).toEqual(['Wann', 'Organisator', '🛡️ Tanks (2)', '💚 Heiler (1)', 'Gesamt']);
+    expect(e.fields.find((f) => f.name === '🛡️ Tanks (2)')).toEqual({ name: '🛡️ Tanks (2)', value: ['⚔️ <@2>', '🛡️ <@1>'].join('\n'), inline: true });
+    expect(e.fields.find((f) => f.name === 'Gesamt')!.value).toBe('3');
   });
   it('marks cancelled events', () => {
-    expect(buildEventEmbed({ ...event, status: 'cancelled' }, []).title).toBe('❌ Cancelled: Raid');
+    expect(buildEventEmbed({ ...event, status: 'cancelled' }, []).title).toBe('❌ Abgesagt: Raid');
   });
 });
 
@@ -51,21 +54,21 @@ describe('roster size handling', () => {
     const e = buildEventEmbed({ ...event, description: 'x'.repeat(2000) }, signups);
     expect(e.fields.every((f) => f.value.length <= 1024)).toBe(true);
     expect(embedSize(e)).toBeLessThanOrEqual(6000);
-    expect(e.fields.find((f) => f.name === 'Total')!.value).toBe('300');
-    expect(e.fields.find((f) => f.name.startsWith('Tanks'))!.value).toContain('×');
+    expect(e.fields.find((f) => f.name === 'Gesamt')!.value).toBe('300');
+    expect(e.fields.find((f) => f.name.includes('Tanks'))!.value).toContain('×');
   });
   it('splits the full roster into messages of at most 2000 characters', () => {
     const chunks = formatFullRoster(make(300));
     expect(chunks.length).toBeGreaterThan(1);
     expect(chunks.every((c) => c.length <= 2000)).toBe(true);
-    expect(chunks.join('\n')).toContain('Total: 300');
+    expect(chunks.join('\n')).toContain('Gesamt: 300');
   });
 });
 
 describe('formatTimeChangeNotice', () => {
   it('mentions everyone and names the new time', () => {
-    expect(formatTimeChangeNotice(['1', '2'], 1900000000)).toBe('<@1> <@2> Time changed to <t:1900000000:F>');
-    expect(formatTimeChangeNotice([], 1900000000)).toBe('Time changed to <t:1900000000:F>');
+    expect(formatTimeChangeNotice(['1', '2'], 1900000000)).toBe('<@1> <@2> Zeit geändert auf <t:1900000000:F>');
+    expect(formatTimeChangeNotice([], 1900000000)).toBe('Zeit geändert auf <t:1900000000:F>');
   });
   it('stays within 2000 characters', () => {
     expect(formatTimeChangeNotice(make(200).map((s) => s.userId), 1900000000).length).toBeLessThanOrEqual(2000);

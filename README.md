@@ -10,6 +10,7 @@ A Discord bot for AION 2 communities: post events, let members sign up with thei
 | `/setup channels` | Set the channels for events and group search |
 | `/setup timezone` | Set the timezone used for dates in forms |
 | `/setup organizer-role` | Set the role allowed to create events (omit to clear) |
+| `/setup lfg-panel` | Post the group search explainer with a create button in the groups channel |
 | `/setup show` | Show the current configuration |
 | `/event create` | Create an event |
 

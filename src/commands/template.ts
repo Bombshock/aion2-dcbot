@@ -20,25 +20,25 @@ const CREATE_AREA = 'tplcreate';
 const SLOTS_FIELD = 'slots';
 const AUTOCOMPLETE_LIMIT = 25;
 const SYNTAX_HELP =
-  'One line per slot as `Label: classes`. Classes are class names, `tank`, `healer`, `dps`, `support` or `any`, separated by commas.';
+  'Eine Zeile pro Platz als `Bezeichnung: Klassen`. Klassen sind Klassennamen, `tank`, `healer`, `dps`, `support` oder `any`, durch Kommas getrennt.';
 
 const data = new SlashCommandBuilder()
   .setName('template')
-  .setDescription('Manage group templates')
+  .setDescription('Gruppenvorlagen verwalten')
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
   .setDMPermission(false)
   .addSubcommand((s) =>
     s
       .setName('create')
-      .setDescription('Create a group template for this server')
-      .addStringOption((o) => o.setName('name').setDescription('Template name').setRequired(true).setMaxLength(MAX_TEMPLATE_NAME_LENGTH)),
+      .setDescription('Eine Gruppenvorlage für diesen Server erstellen')
+      .addStringOption((o) => o.setName('name').setDescription('Vorlagenname').setRequired(true).setMaxLength(MAX_TEMPLATE_NAME_LENGTH)),
   )
-  .addSubcommand((s) => s.setName('list').setDescription('Show built-in and custom templates'))
+  .addSubcommand((s) => s.setName('list').setDescription('Eingebaute und eigene Vorlagen anzeigen'))
   .addSubcommand((s) =>
     s
       .setName('delete')
-      .setDescription('Delete a custom template')
-      .addStringOption((o) => o.setName('name').setDescription('Template name').setRequired(true).setAutocomplete(true)),
+      .setDescription('Eine eigene Vorlage löschen')
+      .addStringOption((o) => o.setName('name').setDescription('Vorlagenname').setRequired(true).setAutocomplete(true)),
   );
 
 const reply = (i: ChatInputCommandInteraction | ModalSubmitInteraction, content: string) =>
@@ -50,21 +50,21 @@ const toDefinition = (t: GroupTemplate) => ({ name: t.name, slots: parseSlotsJso
 
 /** Error message when the name is empty or already used by a built-in or this guild's template. */
 function nameProblem(guildId: string, name: string): string | null {
-  if (!name) return 'The template name must not be empty.';
+  if (!name) return 'Der Vorlagenname darf nicht leer sein.';
   const existing = templatesRepo().findByName(guildId, name);
   if (!existing) return null;
-  return existing.guildId === null ? `**${existing.name}** is a built-in template. Pick another name.` : `A template named **${existing.name}** already exists.`;
+  return existing.guildId === null ? `**${existing.name}** ist eine eingebaute Vorlage. Wähle einen anderen Namen.` : `Eine Vorlage namens **${existing.name}** gibt es bereits.`;
 }
 
 function buildCreateModal(name: string) {
   return new ModalBuilder()
     .setCustomId(buildCustomId(CREATE_AREA, 'submit', name))
-    .setTitle('Create template')
+    .setTitle('Vorlage erstellen')
     .addComponents(
       new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder()
           .setCustomId(SLOTS_FIELD)
-          .setLabel(`Slots (up to ${MAX_SLOTS}, one per line)`)
+          .setLabel(`Plätze (bis zu ${MAX_SLOTS}, einer pro Zeile)`)
           .setStyle(TextInputStyle.Paragraph)
           .setRequired(true)
           .setMaxLength(1000)
@@ -75,7 +75,7 @@ function buildCreateModal(name: string) {
 
 async function submit(i: ModalSubmitInteraction, name: string) {
   const guild = i.guild;
-  if (!guild) return reply(i, 'This command only works in a server.');
+  if (!guild) return reply(i, 'Dieser Befehl funktioniert nur auf einem Server.');
 
   const text = i.fields.getTextInputValue(SLOTS_FIELD);
   const problem = nameProblem(guild.id, name);
@@ -84,10 +84,10 @@ async function submit(i: ModalSubmitInteraction, name: string) {
   const parsed = parseTemplateText(text);
   if (!parsed.ok) {
     // Echo the typed text so the user can copy it into a new attempt.
-    return reply(i, [parsed.message, SYNTAX_HELP, '', 'Your input:', text].join('\n').slice(0, 2000));
+    return reply(i, [parsed.message, SYNTAX_HELP, '', 'Deine Eingabe:', text].join('\n').slice(0, 2000));
   }
   templatesRepo().create({ guildId: guild.id, name, slotsJson: serializeSlots(parsed.value) });
-  return reply(i, `Template **${name}** saved.\n${formatTemplate({ name, slots: parsed.value })}`);
+  return reply(i, `Vorlage **${name}** gespeichert.\n${formatTemplate({ name, slots: parsed.value })}`);
 }
 
 registerHandler(CREATE_AREA, async (interaction, parsed) => {
@@ -105,17 +105,17 @@ function remove(i: ChatInputCommandInteraction, guildId: string) {
   const name = i.options.getString('name', true).trim();
   const repo = templatesRepo();
   const template = repo.findByName(guildId, name);
-  if (!template) return reply(i, `There is no template named **${name}**.`);
-  if (template.guildId === null) return reply(i, 'Built-in templates can’t be deleted.');
+  if (!template) return reply(i, `Es gibt keine Vorlage namens **${name}**.`);
+  if (template.guildId === null) return reply(i, 'Eingebaute Vorlagen können nicht gelöscht werden.');
   repo.delete(template.id);
-  return reply(i, `Template **${template.name}** deleted.`);
+  return reply(i, `Vorlage **${template.name}** gelöscht.`);
 }
 
 export const template: Command = {
   data,
   async execute(interaction) {
     const guild = interaction.guild;
-    if (!guild) return reply(interaction, 'This command only works in a server.');
+    if (!guild) return reply(interaction, 'Dieser Befehl funktioniert nur auf einem Server.');
     switch (interaction.options.getSubcommand()) {
       case 'create': {
         const name = interaction.options.getString('name', true).trim();

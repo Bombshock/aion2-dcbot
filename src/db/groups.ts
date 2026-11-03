@@ -146,12 +146,17 @@ export function createGroupTemplatesRepo(db: Database.Database) {
         .get(guildId, name) as TemplateRow | undefined;
       return row && toTemplate(row);
     },
-    /** Inserts missing built-in templates (guild_id NULL) and updates the slots of existing ones, matched by name. */
+    /**
+     * Inserts missing built-in templates (guild_id NULL), updates the slots of existing ones, matched by name, and
+     * deletes built-ins no longer in the list. Groups keep their own copy of the slots, so they are unaffected.
+     */
     syncBuiltins(templates: readonly { name: string; slotsJson: string }[]): void {
       const find = db.prepare('SELECT id FROM group_templates WHERE guild_id IS NULL AND name = ?');
       const insert = db.prepare('INSERT INTO group_templates (guild_id, name, slots_json) VALUES (NULL, ?, ?)');
       const update = db.prepare('UPDATE group_templates SET slots_json = ? WHERE id = ?');
+      const names = templates.map((t) => t.name);
       db.transaction(() => {
+        db.prepare(`DELETE FROM group_templates WHERE guild_id IS NULL AND name NOT IN (${names.map(() => '?').join(', ')})`).run(...names);
         for (const t of templates) {
           const row = find.get(t.name) as { id: number } | undefined;
           if (row) update.run(t.slotsJson, row.id);

@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { joinableClassIds } from '../domain/groups.js';
-import { serializeSlots, BUILTIN_TEMPLATES } from '../domain/templates.js';
+import { parseTemplateText, serializeSlots, type TemplateSlot } from '../domain/templates.js';
 import { createGroupsRepo } from './groups.js';
 import { openDb } from './index.js';
 import { applySchema } from './schema.js';
@@ -13,7 +13,12 @@ beforeEach(() => {
   applySchema(db);
 });
 
-const template = (name: string) => BUILTIN_TEMPLATES.find((t) => t.name === name)!;
+const TEMPLATE_TEXT: Record<string, string> = {
+  'Duo (2)': 'Any: any\nAny: any',
+  'Open (5)': 'Any: any\n'.repeat(5),
+  'Dungeon (5)': 'Tank: tank\nHealer: healer\nDPS: dps\nDPS: dps\nAny: any',
+};
+const template = (name: string) => ({ slots: (parseTemplateText(TEMPLATE_TEXT[name]!) as { value: TemplateSlot[] }).value });
 const newGroup = (name: string, creatorId = 'u1') => {
   const t = template(name);
   const repo = createGroupsRepo(db);

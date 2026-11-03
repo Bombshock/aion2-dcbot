@@ -61,6 +61,6 @@ describe('missingPermissions', () => {
     expect(missingPermissions((p) => p === 'ViewChannel')).toEqual(['SendMessages', 'EmbedLinks']);
   });
   it('names the channel in the message', () => {
-    expect(formatMissingPermissions('42', ['EmbedLinks'])).toBe("I'm missing EmbedLinks in <#42>.");
+    expect(formatMissingPermissions('42', ['EmbedLinks'])).toBe('Mir fehlt EmbedLinks in <#42>.');
   });
 });

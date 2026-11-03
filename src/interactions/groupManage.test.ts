@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { createGroupsRepo } from '../db/groups.js';
 import { openDb } from '../db/index.js';
 import { applySchema } from '../db/schema.js';
-import { BUILTIN_TEMPLATES, serializeSlots } from '../domain/templates.js';
+import { CLASSES } from '../domain/classes.js';
+import { serializeSlots } from '../domain/templates.js';
 import { GROUP_MANAGE_REFUSED_MESSAGE, groupManageRefusal } from './groupManage.js';
 
 let repo: ReturnType<typeof createGroupsRepo>;
@@ -14,7 +15,8 @@ beforeEach(() => {
 });
 
 const duo = () => {
-  const slots = BUILTIN_TEMPLATES.find((t) => t.name === 'Duo (2)')!.slots;
+  const any = { label: 'Any', allowed: CLASSES.map((c) => c.id) };
+  const slots = [any, any];
   return repo.create({ guildId: 'g', channelId: 'c', creatorId: 'u1', title: 't', slotsJson: serializeSlots(slots), createdAt: 1 });
 };
 
@@ -24,8 +26,8 @@ describe('groupManageRefusal', () => {
     expect(groupManageRefusal(group, 'u1', false)).toBeNull();
     expect(groupManageRefusal(group, 'admin', true)).toBeNull();
     expect(groupManageRefusal(group, 'u2', false)).toBe(GROUP_MANAGE_REFUSED_MESSAGE);
-    expect(groupManageRefusal({ ...group, status: 'closed' }, 'u1', true)).toMatch(/closed/);
-    expect(groupManageRefusal(undefined, 'u1', true)).toMatch(/no longer exists/);
+    expect(groupManageRefusal({ ...group, status: 'closed' }, 'u1', true)).toMatch(/geschlossen/);
+    expect(groupManageRefusal(undefined, 'u1', true)).toMatch(/existiert nicht mehr/);
   });
 });
 
