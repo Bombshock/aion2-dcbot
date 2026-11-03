@@ -31,6 +31,8 @@ const AUTOCOMPLETE_LIMIT = 25;
 const SELECT_LIMIT = 25;
 const GROUP_STATUS_LABEL = { open: 'offen', full: 'voll', closed: 'geschlossen' } as const;
 const UNKNOWN_TEMPLATE_MESSAGE = 'Unbekannte Vorlage';
+/** How long the ephemeral "posted" confirmation stays before it is removed. */
+const CONFIRMATION_TTL_MS = 10_000;
 
 const data = new SlashCommandBuilder()
   .setName('lfg')
@@ -147,15 +149,18 @@ async function submit(i: ModalSubmitInteraction, templateId: string, classId: st
     member,
   );
 
-  await i.deferReply({ flags: MessageFlags.Ephemeral });
+  // From the panel flow the modal came from the ephemeral class picker: reuse that message instead of stacking a new one.
+  if (i.isFromMessage()) await i.deferUpdate();
+  else await i.deferReply({ flags: MessageFlags.Ephemeral });
   try {
     const message = await channel.send(renderGroupMessage({ ...toView(group), slots }, [member]));
     repo.update(group.id, { messageId: message.id });
-    await i.editReply(`Gruppe gepostet: ${message.url}`);
+    await i.editReply({ content: `Gruppe gepostet: ${message.url}`, components: [] });
+    setTimeout(() => i.deleteReply().catch(() => {}), CONFIRMATION_TTL_MS);
   } catch (err) {
     repo.delete(group.id);
     console.error('Posting group failed', err);
-    await i.editReply(`Ich konnte nicht in <#${channel.id}> posten. Prüfe dort meine Berechtigungen.`);
+    await i.editReply({ content: `Ich konnte nicht in <#${channel.id}> posten. Prüfe dort meine Berechtigungen.`, components: [] });
   }
 }
 
