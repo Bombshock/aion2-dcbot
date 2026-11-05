@@ -7,6 +7,7 @@ import { setup } from './setup.js';
 import { template } from './template.js';
 import { lfg } from './lfg.js';
 import { reminders } from './reminders.js';
+import { cleanupCommand } from './cleanup.js';
 
 export interface Command {
   data: { name: string; toJSON(): RESTPostAPIChatInputApplicationCommandsJSONBody };
@@ -17,7 +18,7 @@ export interface Command {
 }
 
 /** Add new commands to this list. */
-export const commands: Command[] = [ping, setup, event, template, lfg, reminders];
+export const commands: Command[] = [ping, setup, event, template, lfg, reminders, cleanupCommand];
 
 export const commandMap = new Map(commands.map((c) => [c.data.name, c]));
 

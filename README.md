@@ -16,6 +16,8 @@ Only admins (Manage Server) and members with the organizer role can use slash co
 | `/setup show` | Show the current configuration |
 | `/event create` | Plan an event from a group template with a duration (organizers only); `weekly:true` reposts it every 7 days after it ends |
 | `/event list` | List the upcoming events |
+| `/cleanup events` | Remove ended events from the database and delete leftover event posts and start reminders in the channels; `all:true` also removes running and repeating events (admins only) |
+| `/cleanup lfg` | The same for group search posts; `all:true` also removes open groups (admins only) |
 
 ## Running the bot
 
