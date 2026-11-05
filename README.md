@@ -31,7 +31,7 @@ Requires Node.js 20 or newer.
    npm start
    ```
 
-   `npm start` runs the root `index.js`, which executes the TypeScript sources directly through tsx, so no build step is needed. Hosts that start a bot with `node index.js` work the same way.
+   `npm install` builds the bot into `dist/` through its postinstall script, and `npm start` runs the root `index.js`, which starts that build. Hosts that run `npm install` and then `node index.js` need no extra step. After changing code locally, rebuild with `npm run build`.
 
 For development, `npm run dev` restarts the bot on changes and `npm test` runs the tests.
 
