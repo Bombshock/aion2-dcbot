@@ -23,14 +23,15 @@ Requires Node.js 20 or newer.
 
 1. Create an application and bot in the [Discord Developer Portal](https://discord.com/developers/applications).
 2. Copy `.env.example` to `.env` and fill in `DISCORD_TOKEN` and `DISCORD_CLIENT_ID`. Set `DEV_GUILD_ID` to register commands on a single test server instantly.
-3. Install, register the slash commands, build and start:
+3. Install, register the slash commands and start:
 
    ```bash
    npm install
    npm run register
-   npm run build
    npm start
    ```
+
+   `npm start` runs the root `index.js`, which executes the TypeScript sources directly through tsx, so no build step is needed. Hosts that start a bot with `node index.js` work the same way.
 
 For development, `npm run dev` restarts the bot on changes and `npm test` runs the tests.
 
