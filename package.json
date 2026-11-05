@@ -27,5 +27,8 @@
   "devDependencies": {
     "tsx": "^4.19.0",
     "vitest": "^2.1.0"
+  },
+  "allowScripts": {
+    "better-sqlite3@11.10.0": true
   }
 }
