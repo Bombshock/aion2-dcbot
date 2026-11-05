@@ -2,7 +2,7 @@ import { MessageFlags, type Client } from 'discord.js';
 import { createGroupsRepo, type GroupMember, type GroupRecord, type GroupsRepo } from '../db/groups.js';
 import { getDb } from '../db/instance.js';
 import { createUserSettingsRepo } from '../db/userSettings.js';
-import { formatClass, getClass } from '../domain/classes.js';
+import { getClass } from '../domain/classes.js';
 import { joinableClassIds } from '../domain/groups.js';
 import { parseSlotsJson } from '../domain/templates.js';
 import { buildClassPicker } from './classPicker.js';
@@ -164,18 +164,14 @@ registerGroupAction('pickclass', async (interaction, parsed) => {
   }
 
   await interaction.deferUpdate();
-  const { group, slotIndex } = result;
+  const { group } = result;
   const ok = await refreshGroupPost(interaction.client, repo, group);
-  const slotLabel = parseSlotsJson(group.slotsJson)[slotIndex]?.label ?? 'Platz';
   if (!ok) return void (await interaction.editReply({ content: GROUP_GONE_MESSAGE, components: [] }));
   const userId = interaction.user.id;
   // The post shows the join; the picker only stays to carry the DM tip for a timed group when the user hasn't turned DMs on.
   if (group.startsAt === null || createUserSettingsRepo(getDb()).getDmReminders(userId)) await dismissReply(interaction);
   else await interaction.editReply({ content: DM_TIP, components: [] });
 
-  if (!result.switched && group.creatorId !== userId) {
-    await announce(interaction.client, group, `<@${group.creatorId}> <@${userId}> ist als ${formatClass(classId)} (${slotLabel}) beigetreten.`, [group.creatorId]);
-  }
   if (result.becameFull) {
     const ids = result.members.map((m) => m.userId);
     await announce(interaction.client, group, `${ids.map((id) => `<@${id}>`).join(' ')} Die Gruppe ist bereit!`, ids);
