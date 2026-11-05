@@ -6,16 +6,18 @@ function menuOf(reply: ReturnType<typeof buildClassPicker>) {
 }
 
 describe('buildClassPicker', () => {
-  it('offers all 8 classes by default with the right customId', () => {
-    const reply = buildClassPicker({ area: 'evt', id: 42 });
+  it('offers all classes (Gladiator as tank and DPS, Chanter as DPS and healer) by default with the right customId', () => {
+    const reply = buildClassPicker({ area: 'grp', id: 42 });
     const menu = menuOf(reply);
     expect(reply.ephemeral).toBe(true);
-    expect(menu.custom_id).toBe('evt:pickclass:42');
+    expect(menu.custom_id).toBe('grp:pickclass:42');
     expect(menu.placeholder).toBe('Wähle deine Klasse');
     expect(menu.min_values).toBe(1);
     expect(menu.max_values).toBe(1);
-    expect(menu.options).toHaveLength(8);
-    expect(menu.options[0]).toMatchObject({ label: 'Gladiator', value: 'gladiator', emoji: { name: '⚔️' } });
+    expect(menu.options).toHaveLength(10);
+    expect(menu.options[0]).toMatchObject({ label: 'Gladiator (Tank)', value: 'gladiator', emoji: { name: '⚔️' } });
+    expect(menu.options[1]).toMatchObject({ label: 'Gladiator (DPS)', value: 'gladiator_dps', emoji: { name: '⚔️' } });
+    expect(menu.options.slice(-2).map((o: any) => o.label)).toEqual(['Chanter (DPS)', 'Chanter (Heiler)']);
     expect(menu.options.some((o: any) => o.default)).toBe(false);
   });
 
@@ -26,7 +28,7 @@ describe('buildClassPicker', () => {
   });
 
   it('preselects the current class only if offered', () => {
-    const on = menuOf(buildClassPicker({ area: 'evt', id: 1, currentClassId: 'cleric' }));
+    const on = menuOf(buildClassPicker({ area: 'grp', id: 1, currentClassId: 'cleric' }));
     expect(on.options.filter((o: any) => o.default).map((o: any) => o.value)).toEqual(['cleric']);
     const off = menuOf(buildClassPicker({ area: 'grp', id: 1, classIds: ['ranger'], currentClassId: 'cleric' }));
     expect(off.options.some((o: any) => o.default)).toBe(false);

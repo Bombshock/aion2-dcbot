@@ -2,7 +2,6 @@ import {
   ActionRowBuilder,
   MessageFlags,
   ModalBuilder,
-  PermissionFlagsBits,
   SlashCommandBuilder,
   TextInputBuilder,
   TextInputStyle,
@@ -20,12 +19,11 @@ const CREATE_AREA = 'tplcreate';
 const SLOTS_FIELD = 'slots';
 const AUTOCOMPLETE_LIMIT = 25;
 const SYNTAX_HELP =
-  'Eine Zeile pro Platz als `Bezeichnung: Klassen`. Klassen sind Klassennamen, `tank`, `healer`, `dps`, `support` oder `any`, durch Kommas getrennt.';
+  'Eine Zeile pro Platz als `Bezeichnung: Klassen`. Klassen sind Klassennamen, `tank`, `healer`, `dps` oder `any`, durch Kommas getrennt.';
 
 const data = new SlashCommandBuilder()
   .setName('template')
   .setDescription('Gruppenvorlagen verwalten')
-  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
   .setDMPermission(false)
   .addSubcommand((s) =>
     s
@@ -68,7 +66,7 @@ function buildCreateModal(name: string) {
           .setStyle(TextInputStyle.Paragraph)
           .setRequired(true)
           .setMaxLength(1000)
-          .setPlaceholder('Tank: tank\nHeal: cleric, chanter\nFlex: any'),
+          .setPlaceholder('Tank: tank\nHeal: healer\nDPS: ranger, chanter\nFlex: any'),
       ),
     );
 }

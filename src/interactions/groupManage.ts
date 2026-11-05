@@ -1,26 +1,18 @@
-import {
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  MessageFlags,
-  ModalBuilder,
-  PermissionFlagsBits,
-  StringSelectMenuBuilder,
-  TextInputBuilder,
-  TextInputStyle,
-} from 'discord.js';
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags, PermissionFlagsBits, StringSelectMenuBuilder, type Client } from 'discord.js';
 import { createGroupsRepo, type GroupRecord } from '../db/groups.js';
 import { getDb } from '../db/instance.js';
 import { formatClass } from '../domain/classes.js';
-import { DATE_FORMAT_HINT, DATE_PLACEHOLDER, formatLocalDateTime, parseFutureDateTime } from '../domain/datetime.js';
+import { formatDuration, formatLocalDateTime, parseDuration, parseFutureDateTime } from '../domain/datetime.js';
+import { formatRepeat, formatTimeChangeNotice } from '../domain/groups.js';
+import { SCHEDULE } from '../domain/schedule.js';
 import { getGuildSettings } from '../settings.js';
 import { GROUP_AREA } from './groupMessage.js';
+import { buildGroupModal, GROUP_FIELD as FIELD } from './groupModal.js';
 import { closeGroup, GROUP_GONE_MESSAGE, refreshGroupPost, registerGroupAction } from './groupJoin.js';
-import { buildCustomId, type ComponentInteraction } from './router.js';
+import { buildCustomId, dismissReply, type ComponentInteraction } from './router.js';
 
 const NOT_FOUND_MESSAGE = 'Diese Gruppe existiert nicht mehr.';
 export const GROUP_MANAGE_REFUSED_MESSAGE = 'Nur der Ersteller kann diese Gruppe verwalten.';
-const FIELD = { title: 'title', description: 'description', when: 'when' } as const;
 
 const ephemeral = (content: string) => ({ content, flags: MessageFlags.Ephemeral }) as const;
 const nowSeconds = () => Math.floor(Date.now() / 1000);
@@ -54,14 +46,21 @@ registerGroupAction('manage', async (interaction, parsed) => {
   if (!interaction.isButton()) return;
   const found = await loadManagedGroup(interaction, parsed.id);
   if (!found) return;
-  const id = found.group.id;
+  const { group } = found;
+  const id = group.id;
+  // Only events with a start time can repeat; the label says what clicking does.
+  const repeatButton =
+    group.kind === 'event' && group.startsAt !== null
+      ? [button('repeat', group.repeatDays ? 'Wiederholung beenden' : 'Wöchentlich wiederholen', ButtonStyle.Secondary, id)]
+      : [];
   await interaction.reply({
-    content: `**${found.group.title}** verwalten`,
+    content: `**${group.title}** verwalten`,
     flags: MessageFlags.Ephemeral,
     components: [
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         button('edit', 'Bearbeiten', ButtonStyle.Primary, id),
         button('kick', 'Mitglied entfernen', ButtonStyle.Secondary, id),
+        ...repeatButton,
         button('close', 'Gruppe schließen', ButtonStyle.Danger, id),
       ),
     ],
@@ -74,35 +73,34 @@ registerGroupAction('edit', async (interaction, parsed) => {
   if (!found) return;
   const { group } = found;
   const { timezone } = getGuildSettings(group.guildId);
-  const row = (input: TextInputBuilder) => new ActionRowBuilder<TextInputBuilder>().addComponents(input);
-  const prefill = (input: TextInputBuilder, value: string) => (value ? input.setValue(value) : input);
   await interaction.showModal(
-    new ModalBuilder()
-      .setCustomId(buildCustomId(GROUP_AREA, 'editsubmit', group.id))
-      .setTitle('Gruppe bearbeiten')
-      .addComponents(
-        row(prefill(new TextInputBuilder().setCustomId(FIELD.title).setLabel('Titel').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(100), group.title)),
-        row(
-          prefill(
-            new TextInputBuilder().setCustomId(FIELD.description).setLabel('Beschreibung').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(2000),
-            group.description,
-          ),
-        ),
-        row(
-          prefill(
-            new TextInputBuilder()
-              .setCustomId(FIELD.when)
-              .setLabel(`Wann (${DATE_FORMAT_HINT}, leer = jetzt)`)
-              .setStyle(TextInputStyle.Short)
-              .setRequired(false)
-              .setPlaceholder(DATE_PLACEHOLDER)
-              .setMaxLength(16),
-            group.startsAt === null ? '' : formatLocalDateTime(group.startsAt, timezone),
-          ),
-        ),
-      ),
+    buildGroupModal(buildCustomId(GROUP_AREA, 'editsubmit', group.id), group.kind === 'event' ? 'Event bearbeiten' : 'Gruppe bearbeiten', {
+      timeRequired: group.kind === 'event',
+      withDuration: group.kind === 'event',
+      values: {
+        title: group.title,
+        description: group.description,
+        when: group.startsAt === null ? '' : formatLocalDateTime(group.startsAt, timezone),
+        duration: formatDuration(group.durationSeconds ?? SCHEDULE.groupExpiryAfterStartSeconds),
+      },
+    }),
   );
 });
+
+/** Tells the members about a new start time in a reply to the post. Failures are logged, not fatal. */
+async function announceTimeChange(client: Client, group: GroupRecord, startsAt: number, userIds: string[]) {
+  try {
+    const channel = await client.channels.fetch(group.channelId);
+    if (!channel?.isSendable()) return;
+    await channel.send({
+      content: formatTimeChangeNotice(userIds, startsAt),
+      allowedMentions: { users: userIds },
+      reply: group.messageId ? { messageReference: group.messageId, failIfNotExists: false } : undefined,
+    });
+  } catch (err) {
+    console.error('Announcing the time change failed', err);
+  }
+}
 
 registerGroupAction('editsubmit', async (interaction, parsed) => {
   if (!interaction.isModalSubmit()) return;
@@ -113,25 +111,59 @@ registerGroupAction('editsubmit', async (interaction, parsed) => {
   const title = interaction.fields.getTextInputValue(FIELD.title).trim();
   const description = interaction.fields.getTextInputValue(FIELD.description).trim();
   const when = interaction.fields.getTextInputValue(FIELD.when).trim();
+  const duration = group.kind === 'event' ? interaction.fields.getTextInputValue(FIELD.duration).trim() : '';
   const { timezone } = getGuildSettings(group.guildId);
+  const echo = async (message: string) => {
+    const text = [message, `Daten werden in ${timezone} gelesen.`, '', 'Deine Eingabe:', `Titel: ${title}`, `Wann: ${when}`, ...(duration ? [`Dauer: ${duration}`] : []), `Beschreibung:\n${description}`].join('\n');
+    await interaction.reply(ephemeral(text.slice(0, 2000)));
+  };
 
   // An unchanged time stays valid even if it has passed; a new time must lie in the future.
   let startsAt: number | null = null;
   if (when) {
     const unchanged = group.startsAt !== null && when === formatLocalDateTime(group.startsAt, timezone);
     const parsedTime = unchanged ? ({ ok: true, epochSeconds: group.startsAt! } as const) : parseFutureDateTime(when, timezone, nowSeconds());
-    if (!parsedTime.ok) {
-      const text = [parsedTime.message, `Daten werden in ${timezone} gelesen.`, '', 'Deine Eingabe:', `Titel: ${title}`, `Wann: ${when}`, `Beschreibung:\n${description}`].join('\n');
-      return void (await interaction.reply(ephemeral(text.slice(0, 2000))));
-    }
+    if (!parsedTime.ok) return echo(parsedTime.message);
     startsAt = parsedTime.epochSeconds;
   }
+  let durationSeconds: number | undefined;
+  if (group.kind === 'event') {
+    const parsedDuration = parseDuration(duration);
+    if (!parsedDuration.ok) return echo(parsedDuration.message);
+    durationSeconds = parsedDuration.seconds;
+  }
 
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const updated = repo.update(group.id, { title, description, startsAt });
-  if (!updated) return void (await interaction.editReply(NOT_FOUND_MESSAGE));
+  // The modal was opened from the ephemeral manage panel; that panel is replaced by errors or removed on success.
+  await interaction.deferUpdate();
+  // A new start more than the reminder lead ahead gets its own reminder.
+  const resetReminder = startsAt !== group.startsAt && startsAt !== null && startsAt - SCHEDULE.reminderLeadSeconds > nowSeconds();
+  const updated = repo.update(group.id, { title, description, startsAt, durationSeconds, ...(resetReminder ? { remindedAt: null } : {}) });
+  if (!updated) return void (await interaction.editReply({ content: NOT_FOUND_MESSAGE, components: [] }));
   const ok = await refreshGroupPost(interaction.client, repo, updated);
-  await interaction.editReply(ok ? 'Gruppe aktualisiert.' : GROUP_GONE_MESSAGE);
+  if (!ok) return void (await interaction.editReply({ content: GROUP_GONE_MESSAGE, components: [] }));
+  if (startsAt !== null && startsAt !== group.startsAt) {
+    const memberIds = repo.listMembers(group.id).map((m) => m.userId);
+    await announceTimeChange(interaction.client, updated, startsAt, memberIds);
+  }
+  await dismissReply(interaction);
+});
+
+/** Turns the weekly repeat of an event on or off and re-renders the post; the panel confirms the new state. */
+registerGroupAction('repeat', async (interaction, parsed) => {
+  if (!interaction.isButton()) return;
+  const found = await loadManagedGroup(interaction, parsed.id);
+  if (!found) return;
+  const { repo, group } = found;
+  if (group.kind !== 'event' || group.startsAt === null) {
+    return void (await interaction.update({ content: 'Nur Events mit Startzeit können sich wiederholen.', components: [] }));
+  }
+  await interaction.deferUpdate();
+  const updated = repo.update(group.id, { repeatDays: group.repeatDays ? null : SCHEDULE.eventRepeatDays });
+  if (!updated) return void (await interaction.editReply({ content: NOT_FOUND_MESSAGE, components: [] }));
+  const ok = await refreshGroupPost(interaction.client, repo, updated);
+  if (!ok) return void (await interaction.editReply({ content: GROUP_GONE_MESSAGE, components: [] }));
+  const state = updated.repeatDays ? `🔁 ${formatRepeat(updated.repeatDays)}: nach dem Ende wird ein neuer Termin gepostet.` : 'Die Wiederholung ist beendet.';
+  await interaction.editReply({ content: state, components: [] });
 });
 
 registerGroupAction('kick', async (interaction, parsed) => {
@@ -174,7 +206,8 @@ registerGroupAction('kickpick', async (interaction, parsed) => {
   }
   await interaction.deferUpdate();
   const ok = await refreshGroupPost(interaction.client, repo, result.group);
-  await interaction.editReply({ content: ok ? `<@${userId}> wurde aus der Gruppe entfernt.` : GROUP_GONE_MESSAGE, components: [] });
+  if (!ok) return void (await interaction.editReply({ content: GROUP_GONE_MESSAGE, components: [] }));
+  await dismissReply(interaction);
 });
 
 registerGroupAction('close', async (interaction, parsed) => {
@@ -183,7 +216,10 @@ registerGroupAction('close', async (interaction, parsed) => {
   if (!found) return;
   const id = found.group.id;
   await interaction.update({
-    content: `**${found.group.title}** schließen? Das kann nicht rückgängig gemacht werden.`,
+    content: [
+      `**${found.group.title}** schließen? Das kann nicht rückgängig gemacht werden.`,
+      ...(found.group.repeatDays ? ['Die Wiederholung endet damit, es wird kein neuer Termin gepostet.'] : []),
+    ].join('\n'),
     components: [
       new ActionRowBuilder<ButtonBuilder>().addComponents(button('closeconfirm', 'Ja, Gruppe schließen', ButtonStyle.Danger, id), button('closeabort', 'Gruppe behalten', ButtonStyle.Secondary, id)),
     ],
@@ -192,7 +228,8 @@ registerGroupAction('close', async (interaction, parsed) => {
 
 registerGroupAction('closeabort', async (interaction) => {
   if (!interaction.isButton()) return;
-  await interaction.update({ content: 'Die Gruppe wurde behalten.', components: [] });
+  await interaction.deferUpdate();
+  await dismissReply(interaction);
 });
 
 registerGroupAction('closeconfirm', async (interaction, parsed) => {
@@ -202,5 +239,6 @@ registerGroupAction('closeconfirm', async (interaction, parsed) => {
   const { repo } = found;
   await interaction.deferUpdate();
   const ok = await closeGroup(interaction.client, repo, found.group.id);
-  await interaction.editReply({ content: ok ? 'Die Gruppe wurde geschlossen.' : GROUP_GONE_MESSAGE, components: [] });
+  if (!ok) return void (await interaction.editReply({ content: GROUP_GONE_MESSAGE, components: [] }));
+  await dismissReply(interaction);
 });

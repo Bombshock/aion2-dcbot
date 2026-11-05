@@ -17,12 +17,13 @@ export interface TemplateDefinition {
 
 export type Result<T> = { ok: true; value: T } | { ok: false; message: string };
 
-const ROLE_SHORTHANDS: readonly Role[] = ['tank', 'healer', 'dps', 'support'];
+const ROLE_SHORTHANDS: readonly Role[] = ['tank', 'healer', 'dps'];
 const ALL_CLASS_IDS = CLASSES.map((c) => c.id);
 
 /**
- * Expands a comma-separated class list into class ids in catalog order. Accepts class ids/names,
- * the role shorthands `tank`, `healer`, `dps`, `support` and `any` (all classes), case-insensitive.
+ * Expands a comma-separated class list into class ids in catalog order. Accepts class ids/names (a name covers
+ * every role of the class, e.g. `gladiator` = tank and DPS Gladiator),
+ * the role shorthands `tank`, `healer`, `dps` and `any` (all classes), case-insensitive.
  */
 export function expandClasses(spec: string): Result<string[]> {
   const ids = new Set<string>();
@@ -33,8 +34,11 @@ export function expandClasses(spec: string): Result<string[]> {
   for (const token of tokens) {
     if (token === 'any') ALL_CLASS_IDS.forEach((id) => ids.add(id));
     else if ((ROLE_SHORTHANDS as readonly string[]).includes(token)) CLASSES.filter((c) => c.role === token).forEach((c) => ids.add(c.id));
-    else if (getClass(token)) ids.add(token);
-    else return { ok: false, message: `Unbekannte Klasse oder Rolle: ${token}` };
+    else {
+      const matches = CLASSES.filter((c) => c.id === token || c.name.toLowerCase() === token);
+      if (matches.length === 0) return { ok: false, message: `Unbekannte Klasse oder Rolle: ${token}` };
+      matches.forEach((c) => ids.add(c.id));
+    }
   }
   return { ok: true, value: ALL_CLASS_IDS.filter((id) => ids.has(id)) };
 }
@@ -54,7 +58,7 @@ export function validateSlots(slots: TemplateSlot[]): Result<TemplateSlot[]> {
   return { ok: true, value: slots };
 }
 
-/** Parses the template modal text: one `Label: classes` line per slot, e.g. `Heal: cleric, chanter`. Blank lines are ignored. */
+/** Parses the template modal text: one `Label: classes` line per slot, e.g. `DPS: ranger, chanter`. Blank lines are ignored. */
 export function parseTemplateText(text: string): Result<TemplateSlot[]> {
   const lines = text
     .split(/\r?\n/)
@@ -63,12 +67,24 @@ export function parseTemplateText(text: string): Result<TemplateSlot[]> {
   const slots: TemplateSlot[] = [];
   for (const [i, line] of lines.entries()) {
     const colon = line.indexOf(':');
-    if (colon < 0) return { ok: false, message: `Zeile ${i + 1}: schreibe sie als \`Bezeichnung: Klassen\`, z. B. \`Heal: cleric, chanter\`.` };
+    if (colon < 0) return { ok: false, message: `Zeile ${i + 1}: schreibe sie als \`Bezeichnung: Klassen\`, z. B. \`DPS: ranger, chanter\`.` };
     const allowed = expandClasses(line.slice(colon + 1));
     if (!allowed.ok) return { ok: false, message: `Zeile ${i + 1}: ${allowed.message}` };
     slots.push({ label: line.slice(0, colon).trim(), allowed: allowed.value });
   }
   return validateSlots(slots);
+}
+
+/**
+ * Lets stored slots take a class added to the catalog later: every slot that allows all of `ifAllowing` gets
+ * `classId`, in catalog order. Other slots are returned unchanged.
+ */
+export function addClassToSlots(slots: TemplateSlot[], classId: string, ifAllowing: readonly string[]): TemplateSlot[] {
+  return slots.map((slot) =>
+    ifAllowing.every((id) => slot.allowed.includes(id)) && !slot.allowed.includes(classId)
+      ? { ...slot, allowed: ALL_CLASS_IDS.filter((id) => id === classId || slot.allowed.includes(id)) }
+      : slot,
+  );
 }
 
 export function serializeSlots(slots: TemplateSlot[]): string {
@@ -97,7 +113,7 @@ export function assignSlot(slots: TemplateSlot[], members: readonly { slotIndex:
 /** `"Tank (Gladiator, Templar)"`; a slot allowing every class shows `"Beliebig (jede Klasse)"`. */
 export function formatSlot(slot: TemplateSlot): string {
   const classes =
-    slot.allowed.length === ALL_CLASS_IDS.length ? 'jede Klasse' : slot.allowed.map((id) => getClass(id)?.name ?? id).join(', ');
+    slot.allowed.length === ALL_CLASS_IDS.length ? 'jede Klasse' : [...new Set(slot.allowed.map((id) => getClass(id)?.name ?? id))].join(', ');
   return `${slot.label} (${classes})`;
 }
 
@@ -126,7 +142,7 @@ const slot = (label: string, spec: string): TemplateSlot => {
 const party = (tanks: number, healers: number, any: number): TemplateSlot[] => [
   ...Array.from({ length: tanks }, () => slot('Tank', 'tank')),
   ...Array.from({ length: healers }, () => slot('Heiler', 'healer')),
-  ...Array.from({ length: any }, () => slot('Beliebig', 'dps, support')),
+  ...Array.from({ length: any }, () => slot('Beliebig', 'dps')),
 ];
 
 /** Built-in templates (guild_id NULL in the DB), available on every server. */

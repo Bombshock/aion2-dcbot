@@ -6,29 +6,6 @@ CREATE TABLE IF NOT EXISTS guild_settings (
   organizer_role_id TEXT
 );
 
-CREATE TABLE IF NOT EXISTS events (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  guild_id    TEXT NOT NULL,
-  channel_id  TEXT NOT NULL,
-  message_id  TEXT,
-  creator_id  TEXT NOT NULL,
-  title       TEXT NOT NULL,
-  description TEXT NOT NULL DEFAULT '',
-  starts_at   INTEGER NOT NULL,
-  status      TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'cancelled', 'ended')),
-  created_at  INTEGER NOT NULL,
-  reminded_at INTEGER
-);
-CREATE INDEX IF NOT EXISTS idx_events_guild_status ON events (guild_id, status, starts_at);
-
-CREATE TABLE IF NOT EXISTS event_signups (
-  event_id      INTEGER NOT NULL REFERENCES events (id) ON DELETE CASCADE,
-  user_id       TEXT NOT NULL,
-  class_id      TEXT NOT NULL,
-  signed_up_at  INTEGER NOT NULL,
-  PRIMARY KEY (event_id, user_id)
-);
-
 CREATE TABLE IF NOT EXISTS group_templates (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   guild_id   TEXT,
@@ -49,7 +26,11 @@ CREATE TABLE IF NOT EXISTS groups (
   slots_json  TEXT NOT NULL,
   starts_at   INTEGER,
   status      TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'full', 'closed')),
-  created_at  INTEGER NOT NULL
+  kind        TEXT NOT NULL DEFAULT 'lfg' CHECK (kind IN ('lfg', 'event')),
+  created_at  INTEGER NOT NULL,
+  reminded_at INTEGER,
+  duration_seconds INTEGER,
+  repeat_days INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_groups_guild_status ON groups (guild_id, status);
 

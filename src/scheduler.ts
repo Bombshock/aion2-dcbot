@@ -1,11 +1,14 @@
 import type { Client } from 'discord.js';
 import type Database from 'better-sqlite3';
-import { createEventsRepo, type EventRecord } from './db/events.js';
-import { createGroupsRepo } from './db/groups.js';
+import { createGroupsRepo, type GroupRecord, type GroupsRepo } from './db/groups.js';
+import { createGuildSettingsRepo } from './db/guildSettings.js';
 import { createUserSettingsRepo } from './db/userSettings.js';
-import { buildReminderMessages, formatEventReminder, SCHEDULE } from './domain/schedule.js';
-import { refreshEventPost } from './interactions/eventSignup.js';
-import { closeGroup } from './interactions/groupJoin.js';
+import { nextOccurrenceStart } from './domain/datetime.js';
+import { buildReminderMessages, formatReminder, SCHEDULE } from './domain/schedule.js';
+import { DEFAULT_SETTINGS } from './domain/settings.js';
+import { parseSlotsJson } from './domain/templates.js';
+import { closeGroup, refreshGroupPost } from './interactions/groupJoin.js';
+import { renderGroupMessage } from './interactions/groupMessage.js';
 
 const nowSeconds = () => Math.floor(Date.now() / 1000);
 
@@ -20,23 +23,23 @@ async function each<T>(label: string, items: T[], job: (item: T) => Promise<void
   }
 }
 
-async function remindEvent(client: Client, db: Database.Database, event: EventRecord, now: number): Promise<void> {
-  const events = createEventsRepo(db);
+async function remindGroup(client: Client, db: Database.Database, group: GroupRecord, now: number): Promise<void> {
+  const groups = createGroupsRepo(db);
   // Marked first, so a failing send is never retried every minute.
-  events.update(event.id, { remindedAt: now });
-  const userIds = events.listSignups(event.id).map((s) => s.userId);
-  if (userIds.length === 0) return;
+  groups.update(group.id, { remindedAt: now });
+  const userIds = groups.listMembers(group.id).map((m) => m.userId);
+  if (userIds.length === 0 || group.startsAt === null) return;
 
-  const link = event.messageId ? `https://discord.com/channels/${event.guildId}/${event.channelId}/${event.messageId}` : '';
-  const header = formatEventReminder(event.title, event.startsAt, link);
+  const link = group.messageId ? `https://discord.com/channels/${group.guildId}/${group.channelId}/${group.messageId}` : '';
+  const header = formatReminder(group.title, group.startsAt, link);
   try {
-    const channel = await client.channels.fetch(event.channelId);
+    const channel = await client.channels.fetch(group.channelId);
     if (!channel?.isSendable()) throw new Error('channel is not sendable');
     for (const content of buildReminderMessages(header, userIds)) {
       await channel.send({ content, allowedMentions: { users: userIds } });
     }
   } catch (err) {
-    console.error(`Scheduler: reminder for event ${event.id} could not be posted`, err);
+    console.error(`Scheduler: reminder for group ${group.id} could not be posted`, err);
   }
 
   for (const userId of createUserSettingsRepo(db).filterDmEnabled(userIds)) {
@@ -49,18 +52,33 @@ async function remindEvent(client: Client, db: Database.Database, event: EventRe
   }
 }
 
+/**
+ * A repeating event ended: closes it, deletes its post and posts the next occurrence (no sign-ups carried over) in the same channel.
+ * The DB rollover happens first, so a failing Discord call never stops the repeat; a next occurrence whose post failed is
+ * retried when it ends in turn.
+ */
+async function repostRepeatingEvent(client: Client, db: Database.Database, groups: GroupsRepo, group: GroupRecord, now: number): Promise<void> {
+  const timezone = createGuildSettingsRepo(db).get(group.guildId)?.timezone ?? DEFAULT_SETTINGS.timezone;
+  const startsAt = nextOccurrenceStart(group.startsAt!, group.repeatDays!, timezone, now);
+  const rolled = groups.rollOver(group.id, startsAt, now);
+  if (!rolled) return;
+  await refreshGroupPost(client, groups, rolled.closed).catch((err) => console.error(`Scheduler: deleting the post of event ${group.id} failed`, err));
+
+  const { next } = rolled;
+  const channel = await client.channels.fetch(next.channelId);
+  if (!channel?.isSendable()) throw new Error(`channel ${next.channelId} of repeating event ${next.id} is not sendable`);
+  const message = await channel.send(renderGroupMessage({ ...next, slots: parseSlotsJson(next.slotsJson) }, []));
+  groups.update(next.id, { messageId: message.id });
+}
+
 /** One scheduler pass. Reads everything that is due from the DB at `now`, so a restart loses nothing. */
 export async function runTick(client: Client, db: Database.Database, now: number): Promise<void> {
-  const events = createEventsRepo(db);
   const groups = createGroupsRepo(db);
 
-  await each('event reminder', events.listDueForReminder(now, SCHEDULE.eventReminderLeadSeconds), (e) => remindEvent(client, db, e, now));
-  await each('event start', events.listDueToStart(now), async (event) => {
-    const updated = events.update(event.id, { status: 'ended' });
-    if (updated) await refreshEventPost(client, events, updated);
-  });
+  await each('reminder', groups.listDueForReminder(now, SCHEDULE.reminderLeadSeconds), (g) => remindGroup(client, db, g, now));
   await each('group expiry', groups.listExpired(now, SCHEDULE.groupExpiryAfterStartSeconds, SCHEDULE.groupExpiryAfterCreateSeconds), async (group) => {
-    await closeGroup(client, groups, group.id);
+    if (group.kind === 'event' && group.repeatDays && group.startsAt !== null) await repostRepeatingEvent(client, db, groups, group, now);
+    else await closeGroup(client, groups, group.id);
   });
 }
 

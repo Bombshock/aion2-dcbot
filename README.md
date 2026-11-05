@@ -4,6 +4,8 @@ A Discord bot for AION 2 communities: post events, let members sign up with thei
 
 ## Commands
 
+Only admins (Manage Server) and members with the organizer role can use slash commands; `/reminders dm` is open to everyone. Members join and create groups through the post buttons and the LFG panel.
+
 | Command | What it does |
 | --- | --- |
 | `/ping` | Check that the bot is alive |
@@ -12,7 +14,8 @@ A Discord bot for AION 2 communities: post events, let members sign up with thei
 | `/setup organizer-role` | Set the role allowed to create events (omit to clear) |
 | `/setup lfg-panel` | Post the group search explainer with a create button in the groups channel |
 | `/setup show` | Show the current configuration |
-| `/event create` | Create an event |
+| `/event create` | Plan an event from a group template with a duration (organizers only); `weekly:true` reposts it every 7 days after it ends |
+| `/event list` | List the upcoming events |
 
 ## Running the bot
 

@@ -73,3 +73,49 @@ export function parseFutureDateTime(input: string, timeZone: string, nowSeconds:
   if (r.ok && r.epochSeconds <= nowSeconds) return { ok: false, message: 'Dieses Datum liegt in der Vergangenheit.' };
   return r;
 }
+
+export const DURATION_FORMAT_HINT = 'z. B. 2h, 90m, 1h30m';
+/** Events can't run longer than a day, which keeps an occurrence well clear of the next one. */
+export const MAX_DURATION_SECONDS = 24 * 60 * 60;
+
+const DURATION_PATTERN = /^(?:(\d+)\s*h)?\s*(?:(\d+)\s*m(?:in)?)?$/i;
+const CLOCK_DURATION_PATTERN = /^(\d{1,2}):(\d{2})$/;
+
+export type DurationResult = { ok: true; seconds: number } | { ok: false; message: string };
+
+/** Parses a duration like `2h`, `90m`, `1h30m`, `1h 30min` or `1:30` into seconds; between 1 minute and 24 hours. */
+export function parseDuration(input: string): DurationResult {
+  const text = input.trim();
+  const clock = CLOCK_DURATION_PATTERN.exec(text);
+  const m = clock ?? DURATION_PATTERN.exec(text);
+  const minutesOk = !clock || Number(clock[2]) < 60;
+  const seconds = m && text && minutesOk ? (Number(m[1] ?? 0) * 60 + Number(m[2] ?? 0)) * 60 : 0;
+  if (seconds <= 0) return { ok: false, message: `Diese Dauer konnte ich nicht lesen (${DURATION_FORMAT_HINT}).` };
+  if (seconds > MAX_DURATION_SECONDS) return { ok: false, message: 'Ein Event kann höchstens 24 Stunden dauern.' };
+  return { ok: true, seconds };
+}
+
+/** Formats seconds as `2h`, `45m` or `1h30m` (the inverse of `parseDuration`). */
+export function formatDuration(seconds: number): string {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return `${hours ? `${hours}h` : ''}${minutes || !hours ? `${minutes}m` : ''}`;
+}
+
+/** The same wall-clock time `days` days later in `timeZone`, so a weekly 20:00 stays at 20:00 across DST changes. */
+export function addLocalDays(epochSeconds: number, days: number, timeZone: string): number {
+  const [date = '', time = ''] = formatLocalDateTime(epochSeconds, timeZone).split(' ');
+  const [day, month, year] = date.split('.').map(Number) as [number, number, number];
+  const shifted = new Date(Date.UTC(year, month - 1, day + days));
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const r = parseLocalDateTime(`${pad(shifted.getUTCDate())}.${pad(shifted.getUTCMonth() + 1)}.${shifted.getUTCFullYear()} ${time}`, timeZone);
+  // The time doesn't exist that day (skipped by a DST change): fall back to plain elapsed time. The format drops seconds; add them back.
+  return r.ok ? r.epochSeconds + (epochSeconds % 60) : epochSeconds + days * 86_400;
+}
+
+/** Start of the next occurrence of a repeating event: `days` days on, and further on until it lies after `nowSeconds`. */
+export function nextOccurrenceStart(startsAt: number, days: number, timeZone: string, nowSeconds: number): number {
+  let next = addLocalDays(startsAt, days, timeZone);
+  while (next <= nowSeconds) next = addLocalDays(next, days, timeZone);
+  return next;
+}

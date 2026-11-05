@@ -1,12 +1,13 @@
 import { MessageFlags, type Client } from 'discord.js';
 import { createGroupsRepo, type GroupMember, type GroupRecord, type GroupsRepo } from '../db/groups.js';
 import { getDb } from '../db/instance.js';
+import { createUserSettingsRepo } from '../db/userSettings.js';
 import { formatClass, getClass } from '../domain/classes.js';
 import { joinableClassIds } from '../domain/groups.js';
 import { parseSlotsJson } from '../domain/templates.js';
 import { buildClassPicker } from './classPicker.js';
 import { GROUP_AREA, renderGroupMessage } from './groupMessage.js';
-import { registerHandler, type ComponentInteraction, type ParsedCustomId } from './router.js';
+import { dismissReply, registerHandler, type ComponentInteraction, type ParsedCustomId } from './router.js';
 
 const DISCORD_UNKNOWN_CHANNEL = 10003;
 const DISCORD_UNKNOWN_MESSAGE = 10008;
@@ -15,6 +16,7 @@ const NOT_FOUND_MESSAGE = 'Diese Gruppe existiert nicht mehr.';
 const CLOSED_MESSAGE = 'Diese Gruppe ist geschlossen.';
 const FULL_MESSAGE = 'Diese Gruppe ist voll';
 export const GROUP_GONE_MESSAGE = 'Der Gruppen-Post wurde gelöscht, daher ist die Gruppe jetzt geschlossen.';
+const DM_TIP = 'Tipp: Mit `/reminders dm` bekommst du vor dem Start auch eine DM.';
 
 type GroupAction = (interaction: ComponentInteraction, parsed: ParsedCustomId) => Promise<void>;
 const actions = new Map<string, GroupAction>();
@@ -32,25 +34,61 @@ const ephemeral = (content: string) => ({ content, flags: MessageFlags.Ephemeral
 
 const toMemberViews = (members: GroupMember[]) => members.map((m) => ({ userId: m.userId, classId: m.classId, slotIndex: m.slotIndex }));
 
-/** Re-renders the group post. Returns false (and closes the group) when the post is gone. */
-export async function refreshGroupPost(client: Client, repo: GroupsRepo, group: GroupRecord): Promise<boolean> {
+/** The group's post, or null when it or its channel was deleted. Other errors (missing access, outages) are thrown. */
+async function fetchGroupPost(client: Client, group: GroupRecord) {
+  if (!group.messageId) return null;
   try {
-    if (!group.messageId) throw Object.assign(new Error('no message'), { code: DISCORD_UNKNOWN_MESSAGE });
     const channel = await client.channels.fetch(group.channelId);
-    if (!channel?.isTextBased()) throw Object.assign(new Error('no channel'), { code: DISCORD_UNKNOWN_CHANNEL });
-    const message = await channel.messages.fetch(group.messageId);
-    const view = { ...group, slots: parseSlotsJson(group.slotsJson) };
-    await message.edit(renderGroupMessage(view, toMemberViews(repo.listMembers(group.id))));
-    return true;
+    if (!channel?.isTextBased()) return null;
+    return await channel.messages.fetch(group.messageId);
   } catch (err) {
     const code = (err as { code?: number }).code;
-    if (code !== DISCORD_UNKNOWN_MESSAGE && code !== DISCORD_UNKNOWN_CHANNEL) throw err;
-    repo.update(group.id, { status: 'closed' });
-    return false;
+    if (code === DISCORD_UNKNOWN_MESSAGE || code === DISCORD_UNKNOWN_CHANNEL) return null;
+    throw err;
   }
 }
 
-/** Closes the group and re-renders its post; the one place to hook thread archiving into later. Returns false when the post is gone. */
+/** Re-renders the group post, or deletes it once the group is closed. Returns false (and closes the group) when the post is gone. */
+export async function refreshGroupPost(client: Client, repo: GroupsRepo, group: GroupRecord): Promise<boolean> {
+  const message = await fetchGroupPost(client, group);
+  const view = { ...group, slots: parseSlotsJson(group.slotsJson) };
+  const write = message && (group.status === 'closed' ? message.delete() : message.edit(renderGroupMessage(view, toMemberViews(repo.listMembers(group.id)))));
+  const edited = await write?.then(
+    () => true,
+    (err) => {
+      // Deleted between fetch and edit.
+      if ((err as { code?: number }).code === DISCORD_UNKNOWN_MESSAGE) return false;
+      throw err;
+    },
+  );
+  if (edited) return true;
+  repo.update(group.id, { status: 'closed' });
+  return false;
+}
+
+/**
+ * Closes the given groups whose post was deleted, e.g. by a moderator while the bot was offline.
+ * A post that can't be checked counts as still there.
+ */
+export async function closeVanishedGroups(client: Client, repo: GroupsRepo, groups: readonly GroupRecord[]): Promise<void> {
+  await Promise.all(
+    groups.map(async (group) => {
+      const gone = await fetchGroupPost(client, group).then(
+        (message) => message === null,
+        (err) => (console.error('Checking group post failed', err), false),
+      );
+      if (gone) repo.update(group.id, { status: 'closed' });
+    }),
+  );
+}
+
+/** Closes the groups whose post was among the deleted messages. */
+export function closeGroupsOfDeletedPosts(messageIds: readonly string[]): void {
+  const repo = createGroupsRepo(getDb());
+  for (const group of repo.listActiveByMessageIds(messageIds)) repo.update(group.id, { status: 'closed' });
+}
+
+/** Closes the group and deletes its post; the one place to hook thread archiving into later. Returns false when the post is gone. */
 export async function closeGroup(client: Client, repo: GroupsRepo, groupId: number): Promise<boolean> {
   const updated = repo.update(groupId, { status: 'closed' });
   return updated ? refreshGroupPost(client, repo, updated) : false;
@@ -106,13 +144,12 @@ registerGroupAction('pickclass', async (interaction, parsed) => {
   const { group, slotIndex } = result;
   const ok = await refreshGroupPost(interaction.client, repo, group);
   const slotLabel = parseSlotsJson(group.slotsJson)[slotIndex]?.label ?? 'Platz';
-  await interaction.editReply({
-    content: ok ? `Du ${result.switched ? 'hast gewechselt zu' : 'bist beigetreten als'} ${formatClass(classId)} (Platz ${slotLabel})` : GROUP_GONE_MESSAGE,
-    components: [],
-  });
-  if (!ok) return;
-
+  if (!ok) return void (await interaction.editReply({ content: GROUP_GONE_MESSAGE, components: [] }));
   const userId = interaction.user.id;
+  // The post shows the join; the picker only stays to carry the DM tip for a timed group when the user hasn't turned DMs on.
+  if (group.startsAt === null || createUserSettingsRepo(getDb()).getDmReminders(userId)) await dismissReply(interaction);
+  else await interaction.editReply({ content: DM_TIP, components: [] });
+
   if (!result.switched && group.creatorId !== userId) {
     await announce(interaction.client, group, `<@${group.creatorId}> <@${userId}> ist als ${formatClass(classId)} (${slotLabel}) beigetreten.`, [group.creatorId]);
   }
@@ -130,10 +167,11 @@ registerGroupAction('leave', async (interaction, parsed) => {
     const message = { not_found: NOT_FOUND_MESSAGE, closed: CLOSED_MESSAGE, not_member: 'Du bist nicht in dieser Gruppe.' }[result.reason];
     return void (await interaction.reply(ephemeral(message)));
   }
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  // The button sits on the public post: acknowledge silently, the refreshed post shows the change.
+  await interaction.deferUpdate();
   const ok = await refreshGroupPost(interaction.client, repo, result.group);
-  await interaction.editReply(ok ? 'Du hast die Gruppe verlassen.' : GROUP_GONE_MESSAGE);
-  if (ok && result.newCreatorId) {
+  if (!ok) return void (await interaction.followUp(ephemeral(GROUP_GONE_MESSAGE)));
+  if (result.newCreatorId) {
     await announce(interaction.client, result.group, `<@${result.newCreatorId}> ist jetzt Ersteller dieser Gruppe.`, [result.newCreatorId]);
   }
 });

@@ -5,6 +5,7 @@ import {
   BUILTIN_TEMPLATES,
   expandClasses,
   formatSlot,
+  addClassToSlots,
   formatTemplateList,
   parseSlotsJson,
   parseTemplateText,
@@ -19,12 +20,17 @@ const dungeon = (parseTemplateText('Tank: tank\nHealer: healer\nDPS: dps\nDPS: d
 describe('expandClasses', () => {
   it('expands role shorthands and any', () => {
     expect(expandClasses('tank')).toEqual({ ok: true, value: ['gladiator', 'templar'] });
-    expect(expandClasses('healer')).toEqual({ ok: true, value: ['cleric'] });
+    expect(expandClasses('healer')).toEqual({ ok: true, value: ['cleric', 'chanter_healer'] });
     expect(expandClasses('any')).toEqual({ ok: true, value: ALL });
   });
 
   it('accepts class names case-insensitively, dedupes and keeps catalog order', () => {
-    expect(expandClasses(' Chanter, cleric , healer')).toEqual({ ok: true, value: ['cleric', 'chanter'] });
+    expect(expandClasses(' Chanter, cleric , healer')).toEqual({ ok: true, value: ['cleric', 'chanter', 'chanter_healer'] });
+  });
+
+  it('expands a class name to all its roles, a role-specific id to just that one', () => {
+    expect(expandClasses('gladiator')).toEqual({ ok: true, value: ['gladiator', 'gladiator_dps'] });
+    expect(expandClasses('gladiator_dps')).toEqual({ ok: true, value: ['gladiator_dps'] });
   });
 
   it('rejects unknown classes', () => {
@@ -38,7 +44,7 @@ describe('parseTemplateText', () => {
       ok: true,
       value: [
         { label: 'Tank', allowed: ['gladiator', 'templar'] },
-        { label: 'Heal', allowed: ['cleric', 'chanter'] },
+        { label: 'Heal', allowed: ['cleric', 'chanter', 'chanter_healer'] },
         { label: 'Flex', allowed: ALL },
       ],
     });
@@ -90,7 +96,7 @@ describe('assignSlot', () => {
   it('prefers the most restrictive slot, then the earliest', () => {
     expect(assignSlot(dungeon, [], 'templar')).toBe(0);
     expect(assignSlot(dungeon, [], 'ranger')).toBe(2);
-    expect(assignSlot(dungeon, [], 'chanter')).toBe(4);
+    expect(assignSlot(dungeon, [], 'chanter')).toBe(2);
   });
 
   it('skips taken slots and falls back to less restrictive ones', () => {
@@ -105,6 +111,16 @@ describe('assignSlot', () => {
   });
 });
 
+describe('addClassToSlots', () => {
+  it('adds the class to slots that allow all given classes, leaving others as is', () => {
+    const oldDps = { label: 'DPS', allowed: ['assassin', 'ranger', 'sorcerer', 'spiritmaster', 'chanter'] };
+    const tank = { label: 'Tank', allowed: ['gladiator', 'templar'] };
+    const picky = { label: 'Range', allowed: ['ranger', 'sorcerer'] };
+    expect(addClassToSlots([tank, oldDps, picky], 'gladiator_dps', oldDps.allowed)).toEqual([tank, { label: 'DPS', allowed: ['gladiator_dps', ...oldDps.allowed] }, picky]);
+    expect(addClassToSlots(dungeon, 'gladiator_dps', oldDps.allowed)).toEqual(dungeon);
+  });
+});
+
 describe('built-in templates', () => {
   it('are valid and have the agreed tank / healer / any split', () => {
     for (const t of BUILTIN_TEMPLATES) expect(validateSlots(t.slots).ok).toBe(true);
@@ -116,12 +132,12 @@ describe('built-in templates', () => {
     ]);
   });
 
-  it('take Gladiator and Templar as tanks, only Cleric as healer and every other class for Any', () => {
+  it('take Gladiator and Templar as tanks, Cleric and Chanter as healers and every DPS (including Gladiator) for Any', () => {
     const allowed = BUILTIN_TEMPLATES[0]!.slots.map((s) => s.allowed);
     expect(allowed).toEqual([
       ['gladiator', 'templar'],
-      ['cleric'],
-      ...Array.from({ length: 3 }, () => ['assassin', 'ranger', 'sorcerer', 'spiritmaster', 'chanter']),
+      ['cleric', 'chanter_healer'],
+      ...Array.from({ length: 3 }, () => ['gladiator_dps', 'assassin', 'ranger', 'sorcerer', 'spiritmaster', 'chanter']),
     ]);
   });
 

@@ -1,16 +1,17 @@
-import { Client, Events, GatewayIntentBits, MessageFlags } from 'discord.js';
+import { Client, Events, GatewayIntentBits, MessageFlags, Partials } from 'discord.js';
 import { loadConfig } from './config.js';
-import { commandMap } from './commands/index.js';
+import { canUseCommand, commandMap, COMMAND_NOT_ALLOWED_MESSAGE } from './commands/index.js';
 import { routeInteraction } from './interactions/router.js';
-import './interactions/eventSignup.js';
-import './interactions/eventManage.js';
+import './interactions/groupCreate.js';
 import './interactions/groupManage.js';
+import { closeGroupsOfDeletedPosts } from './interactions/groupJoin.js';
 import { getDb } from './db/instance.js';
 import { startScheduler } from './scheduler.js';
 import { syncClassEmojis } from './classEmojis.js';
 
 const config = loadConfig();
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+// GuildMessages and the Message partial deliver deletions of group posts, also of posts not in the cache.
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages], partials: [Partials.Message] });
 
 client.once(Events.ClientReady, async (c) => {
   console.log(`Logged in as ${c.user.tag}`);
@@ -18,12 +19,27 @@ client.once(Events.ClientReady, async (c) => {
   startScheduler(c, getDb());
 });
 
+client.on(Events.MessageDelete, (message) => closeGroupsOfDeletedPosts([message.id]));
+client.on(Events.MessageBulkDelete, (messages) => closeGroupsOfDeletedPosts([...messages.keys()]));
+
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
     if (interaction.isChatInputCommand()) {
-      await commandMap.get(interaction.commandName)?.execute(interaction);
+      const command = commandMap.get(interaction.commandName);
+      if (!command) return;
+      if (!canUseCommand(command, interaction)) {
+        await interaction.reply({ content: COMMAND_NOT_ALLOWED_MESSAGE, flags: MessageFlags.Ephemeral });
+        return;
+      }
+      await command.execute(interaction);
     } else if (interaction.isAutocomplete()) {
-      await commandMap.get(interaction.commandName)?.autocomplete?.(interaction);
+      const command = commandMap.get(interaction.commandName);
+      if (!command) return;
+      if (!canUseCommand(command, interaction)) {
+        await interaction.respond([]);
+        return;
+      }
+      await command.autocomplete?.(interaction);
     } else if (interaction.isMessageComponent() || interaction.isModalSubmit()) {
       await routeInteraction(interaction);
     }

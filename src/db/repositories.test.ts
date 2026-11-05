@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { openDb } from './index.js';
 import { applySchema } from './schema.js';
 import { createGuildSettingsRepo } from './guildSettings.js';
-import { createEventsRepo } from './events.js';
 import { createGroupsRepo, createGroupTemplatesRepo } from './groups.js';
 
 let db: Database.Database;
@@ -20,18 +19,42 @@ describe('schema', () => {
 
   it('adds columns missing from databases created by older versions', () => {
     const old = openDb(':memory:');
-    old.exec(`CREATE TABLE events (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, message_id TEXT,
-      creator_id TEXT NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', starts_at INTEGER NOT NULL,
-      status TEXT NOT NULL DEFAULT 'open', created_at INTEGER NOT NULL);
-    CREATE TABLE groups (
+    old.exec(`CREATE TABLE groups (
       id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, message_id TEXT,
       creator_id TEXT NOT NULL, template_id INTEGER, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
       starts_at INTEGER, status TEXT NOT NULL DEFAULT 'open', created_at INTEGER NOT NULL)`);
     applySchema(old);
     const columns = (table: string) => (old.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
-    expect(columns('events')).toContain('reminded_at');
-    expect(columns('groups')).toContain('slots_json');
+    expect(columns('groups')).toEqual(expect.arrayContaining(['slots_json', 'kind', 'reminded_at']));
+    old.prepare("INSERT INTO groups (guild_id, channel_id, creator_id, title, created_at) VALUES ('g', 'c', 'u', 't', 0)").run();
+    expect(createGroupsRepo(old).listByGuild('g')[0]).toMatchObject({ kind: 'lfg', remindedAt: null });
+  });
+
+  it('once lets DPS / any slots stored before Gladiator (DPS) existed take it', () => {
+    const old = openDb(':memory:');
+    applySchema(old);
+    old.pragma('user_version = 0');
+    const oldDps = ['assassin', 'ranger', 'sorcerer', 'spiritmaster', 'chanter'];
+    const slots = JSON.stringify([
+      { label: 'Tank', allowed: ['gladiator', 'templar'] },
+      { label: 'DPS', allowed: oldDps },
+    ]);
+    old.prepare("INSERT INTO group_templates (guild_id, name, slots_json) VALUES ('g', 'Old', ?)").run(slots);
+    old.prepare("INSERT INTO groups (guild_id, channel_id, creator_id, title, slots_json, created_at) VALUES ('g', 'c', 'u', 't', ?, 0)").run(slots);
+    applySchema(old);
+    for (const table of ['group_templates', 'groups']) {
+      const row = old.prepare(`SELECT slots_json FROM ${table}`).get() as { slots_json: string };
+      expect(JSON.parse(row.slots_json).map((s: { allowed: string[] }) => s.allowed)).toEqual([['gladiator', 'templar'], ['gladiator_dps', ...oldDps]]);
+    }
+    const healer = JSON.stringify([{ label: 'Heal', allowed: ['cleric'] }]);
+    old.prepare('UPDATE groups SET slots_json = ?').run(healer);
+    old.pragma('user_version = 1');
+    applySchema(old);
+    expect(JSON.parse((old.prepare('SELECT slots_json FROM groups').get() as { slots_json: string }).slots_json)[0].allowed).toEqual(['cleric', 'chanter_healer']);
+    // Already migrated: a later slot written without Gladiator (DPS) is left alone.
+    old.prepare('UPDATE groups SET slots_json = ?').run(slots);
+    applySchema(old);
+    expect((old.prepare('SELECT slots_json FROM groups').get() as { slots_json: string }).slots_json).toBe(slots);
   });
 });
 
@@ -45,56 +68,6 @@ describe('guild settings', () => {
     expect(repo.get('g1')).toMatchObject({ groupsChannelId: 'c2', organizerRoleId: 'r1' });
     expect(repo.delete('g1')).toBe(true);
     expect(repo.get('g1')).toBeUndefined();
-  });
-});
-
-describe('events', () => {
-  const base = { guildId: 'g1', channelId: 'c1', creatorId: 'u1', title: 'Raid', startsAt: 1000, createdAt: 1 };
-
-  it('creates, reads, updates and deletes', () => {
-    const repo = createEventsRepo(db);
-    const e = repo.create(base);
-    expect(e).toMatchObject({ ...base, description: '', status: 'open', messageId: null });
-    expect(repo.listByGuild('g1')).toHaveLength(1);
-    const updated = repo.update(e.id, { title: 'Big Raid', status: 'cancelled', messageId: 'm1' });
-    expect(updated).toMatchObject({ title: 'Big Raid', status: 'cancelled', messageId: 'm1' });
-    expect(repo.listByGuild('g1', 'open')).toHaveLength(0);
-    expect(repo.delete(e.id)).toBe(true);
-    expect(repo.get(e.id)).toBeUndefined();
-  });
-
-  it('rejects invalid status', () => {
-    const repo = createEventsRepo(db);
-    const e = repo.create(base);
-    expect(() => repo.update(e.id, { status: 'bogus' as never })).toThrow();
-  });
-
-  it('lists open events in a time range', () => {
-    const repo = createEventsRepo(db);
-    repo.create(base);
-    repo.create({ ...base, startsAt: 5000 });
-    expect(repo.listOpenStartingBetween(0, 2000)).toHaveLength(1);
-  });
-
-  it('manages signups and rejects a second signup by the same user', () => {
-    const repo = createEventsRepo(db);
-    const e = repo.create(base);
-    repo.addSignup(e.id, 'u1', 'gladiator', 5);
-    expect(() => repo.addSignup(e.id, 'u1', 'cleric', 6)).toThrow(/UNIQUE|PRIMARY KEY/);
-    repo.addSignup(e.id, 'u2', 'cleric', 7);
-    expect(repo.listSignups(e.id).map((s) => s.userId)).toEqual(['u1', 'u2']);
-    expect(repo.updateSignupClass(e.id, 'u1', 'ranger')).toBe(true);
-    expect(repo.getSignup(e.id, 'u1')?.classId).toBe('ranger');
-    expect(repo.removeSignup(e.id, 'u1')).toBe(true);
-    expect(repo.getSignup(e.id, 'u1')).toBeUndefined();
-  });
-
-  it('deletes signups with their event', () => {
-    const repo = createEventsRepo(db);
-    const e = repo.create(base);
-    repo.addSignup(e.id, 'u1', 'gladiator');
-    repo.delete(e.id);
-    expect(repo.listSignups(e.id)).toEqual([]);
   });
 });
 

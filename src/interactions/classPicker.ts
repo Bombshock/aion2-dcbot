@@ -1,9 +1,9 @@
 import { ActionRowBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder } from 'discord.js';
-import { CLASSES } from '../domain/classes.js';
+import { CLASSES, classLabel } from '../domain/classes.js';
 import { buildCustomId } from './router.js';
 
 export interface ClassPickerOptions {
-  area: 'evt' | 'grp';
+  area: 'grp';
   /** customId action; defaults to `pickclass`. */
   action?: string;
   id: string | number;
@@ -27,7 +27,7 @@ export function buildClassPicker(opts: ClassPickerOptions) {
     .addOptions(
       offered.map((c) =>
         new StringSelectMenuOptionBuilder()
-          .setLabel(c.name)
+          .setLabel(classLabel(c))
           .setValue(c.id)
           .setEmoji(c.emoji)
           .setDefault(c.id === opts.currentClassId),

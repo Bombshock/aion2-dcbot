@@ -4,36 +4,24 @@ import {
   ButtonStyle,
   EmbedBuilder,
   MessageFlags,
-  ModalBuilder,
   SlashCommandBuilder,
   StringSelectMenuBuilder,
-  TextInputBuilder,
-  TextInputStyle,
-  type AutocompleteInteraction,
   type ChatInputCommandInteraction,
-  type ModalSubmitInteraction,
 } from 'discord.js';
 import type { Command } from './index.js';
-import { createGroupsRepo, createGroupTemplatesRepo, type GroupRecord } from '../db/groups.js';
+import { createGroupsRepo, createGroupTemplatesRepo, type GroupKind } from '../db/groups.js';
 import { getDb } from '../db/instance.js';
-import { CLASSES, getClass } from '../domain/classes.js';
-import { DATE_FORMAT_HINT, DATE_PLACEHOLDER, parseFutureDateTime } from '../domain/datetime.js';
-import { checkCreateGroup, statusForFill } from '../domain/groups.js';
-import { parseSlotsJson, type Result, type TemplateSlot } from '../domain/templates.js';
+import { CLASSES, classLabel } from '../domain/classes.js';
 import { buildClassPicker } from '../interactions/classPicker.js';
-import { GROUP_AREA, renderGroupMessage } from '../interactions/groupMessage.js';
+import { DUNGEONS, formatItemLevel, getDungeon, PRESET_TEMPLATE_NAME } from '../domain/dungeons.js';
+import { autocompleteCreateOptions, buildCreateModal, closeVanishedBeforeModal, prepareCreate, refusalReply } from '../interactions/groupCreate.js';
+import { GROUP_AREA } from '../interactions/groupMessage.js';
 import { registerGroupAction } from '../interactions/groupJoin.js';
 import { buildCustomId } from '../interactions/router.js';
-import { getGroupsChannel, getGuildSettings, SETUP_REQUIRED_MESSAGE } from '../settings.js';
+import { getGroupsChannel, SETUP_REQUIRED_MESSAGE } from '../settings.js';
 
-const FIELD = { title: 'title', description: 'description', when: 'when' } as const;
-const AUTOCOMPLETE_LIMIT = 25;
 const SELECT_LIMIT = 25;
 const GROUP_STATUS_LABEL = { open: 'offen', full: 'voll', closed: 'geschlossen' } as const;
-const UNKNOWN_TEMPLATE_MESSAGE = 'Unbekannte Vorlage';
-/** How long the ephemeral "posted" confirmation stays before it is removed. */
-const CONFIRMATION_TTL_MS = 10_000;
-
 const data = new SlashCommandBuilder()
   .setName('lfg')
   .setDescription('Gruppensuche')
@@ -48,136 +36,26 @@ const data = new SlashCommandBuilder()
           .setName('class')
           .setDescription('Deine Klasse')
           .setRequired(true)
-          .addChoices(...CLASSES.map((c) => ({ name: c.name, value: c.id }))),
-      ),
+          .addChoices(...CLASSES.map((c) => ({ name: classLabel(c), value: c.id }))),
+      )
+      .addStringOption((o) => o.setName('dungeon').setDescription('Dungeon, füllt Titel und Beschreibung vor').setAutocomplete(true)),
   )
   .addSubcommand((s) => s.setName('list').setDescription('Die offenen Gruppen dieses Servers anzeigen'));
 
-const reply = (i: ChatInputCommandInteraction | ModalSubmitInteraction, content: string) =>
-  i.reply({ content, flags: MessageFlags.Ephemeral });
+const reply = (i: ChatInputCommandInteraction, content: string) => i.reply({ content, flags: MessageFlags.Ephemeral });
 
-interface Prepared {
-  templateId: number;
-  slots: TemplateSlot[];
-  slotsJson: string;
-  slotIndex: number;
+/** Links to the guild's open or full posts of the kind with status and time, for `/lfg list` and `/event list`; null when there are none. */
+export function formatPostList(guildId: string, kind: GroupKind): string | null {
+  const groups = createGroupsRepo(getDb())
+    .listByGuild(guildId)
+    .filter((g) => g.kind === kind && g.status !== 'closed' && g.messageId);
+  if (groups.length === 0) return null;
+  const lines = groups.map((g) => {
+    const when = g.startsAt === null ? 'jetzt' : `<t:${g.startsAt}:f>`;
+    return `• [${g.title}](https://discord.com/channels/${g.guildId}/${g.channelId}/${g.messageId}) · ${GROUP_STATUS_LABEL[g.status]} · ${when}${g.repeatDays ? ' · 🔁' : ''}`;
+  });
+  return lines.join('\n').slice(0, 2000);
 }
-
-/** Template and limit checks shared by the command and the modal submit (state may change while the modal is open). */
-function prepare(guildId: string, userId: string, templateId: string, classId: string): Result<Prepared> {
-  const id = Number(templateId);
-  const template = Number.isInteger(id) ? createGroupTemplatesRepo(getDb()).get(id) : undefined;
-  if (!template || (template.guildId !== null && template.guildId !== guildId)) return { ok: false, message: UNKNOWN_TEMPLATE_MESSAGE };
-  if (!getClass(classId)) return { ok: false, message: 'Unbekannte Klasse' };
-  const slots = parseSlotsJson(template.slotsJson);
-  const active = createGroupsRepo(getDb()).countActiveByCreator(guildId, userId);
-  const check = checkCreateGroup(slots, classId, active);
-  if (!check.ok) return check;
-  return { ok: true, value: { templateId: template.id, slots, slotsJson: template.slotsJson, slotIndex: check.value } };
-}
-
-function buildModal(templateId: string, classId: string) {
-  const row = (input: TextInputBuilder) => new ActionRowBuilder<TextInputBuilder>().addComponents(input);
-  return new ModalBuilder()
-    .setCustomId(buildCustomId(GROUP_AREA, 'create', `${templateId}:${classId}`))
-    .setTitle('Gruppe erstellen')
-    .addComponents(
-      row(new TextInputBuilder().setCustomId(FIELD.title).setLabel('Titel').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(100).setPlaceholder('Feuertempel-Run')),
-      row(
-        new TextInputBuilder()
-          .setCustomId(FIELD.description)
-          .setLabel('Beschreibung')
-          .setStyle(TextInputStyle.Paragraph)
-          .setRequired(false)
-          .setMaxLength(2000)
-          .setPlaceholder('Ziel, Voraussetzungen, Voice-Chat…'),
-      ),
-      row(
-        new TextInputBuilder()
-          .setCustomId(FIELD.when)
-          .setLabel(`Wann (${DATE_FORMAT_HINT}, leer = jetzt)`)
-          .setStyle(TextInputStyle.Short)
-          .setRequired(false)
-          .setPlaceholder(DATE_PLACEHOLDER)
-          .setMaxLength(16),
-      ),
-    );
-}
-
-async function submit(i: ModalSubmitInteraction, templateId: string, classId: string) {
-  const guild = i.guild;
-  if (!guild) return reply(i, 'Dieser Befehl funktioniert nur auf einem Server.');
-
-  const title = i.fields.getTextInputValue(FIELD.title).trim();
-  const description = i.fields.getTextInputValue(FIELD.description).trim();
-  const when = i.fields.getTextInputValue(FIELD.when).trim();
-
-  const channel = await getGroupsChannel(guild);
-  if (!channel || !channel.isTextBased()) return reply(i, SETUP_REQUIRED_MESSAGE);
-
-  const prepared = prepare(guild.id, i.user.id, templateId, classId);
-  if (!prepared.ok) return reply(i, prepared.message);
-
-  let startsAt: number | null = null;
-  if (when) {
-    const settings = getGuildSettings(guild.id);
-    const parsed = parseFutureDateTime(when, settings.timezone, Math.floor(Date.now() / 1000));
-    if (!parsed.ok) {
-      // Echo the typed values so the user can copy them into a new attempt.
-      const text = [parsed.message, `Daten werden in ${settings.timezone} gelesen.`, '', 'Deine Eingabe:', `Titel: ${title}`, `Wann: ${when}`, `Beschreibung:\n${description}`].join('\n');
-      return reply(i, text.slice(0, 2000));
-    }
-    startsAt = parsed.epochSeconds;
-  }
-
-  const { slots, slotIndex } = prepared.value;
-  const member = { userId: i.user.id, classId, slotIndex };
-  // The checks above and this insert run without an await in between, so the limit can't be raced.
-  const repo = createGroupsRepo(getDb());
-  const group = repo.createWithMember(
-    {
-      guildId: guild.id,
-      channelId: channel.id,
-      creatorId: i.user.id,
-      templateId: prepared.value.templateId,
-      title,
-      description,
-      slotsJson: prepared.value.slotsJson,
-      startsAt,
-      status: statusForFill(slots, [member]),
-    },
-    member,
-  );
-
-  // From the panel flow the modal came from the ephemeral class picker: reuse that message instead of stacking a new one.
-  if (i.isFromMessage()) await i.deferUpdate();
-  else await i.deferReply({ flags: MessageFlags.Ephemeral });
-  try {
-    const message = await channel.send(renderGroupMessage({ ...toView(group), slots }, [member]));
-    repo.update(group.id, { messageId: message.id });
-    await i.editReply({ content: `Gruppe gepostet: ${message.url}`, components: [] });
-    setTimeout(() => i.deleteReply().catch(() => {}), CONFIRMATION_TTL_MS);
-  } catch (err) {
-    repo.delete(group.id);
-    console.error('Posting group failed', err);
-    await i.editReply({ content: `Ich konnte nicht in <#${channel.id}> posten. Prüfe dort meine Berechtigungen.`, components: [] });
-  }
-}
-
-const toView = (g: GroupRecord) => ({
-  id: g.id,
-  creatorId: g.creatorId,
-  title: g.title,
-  description: g.description,
-  startsAt: g.startsAt,
-  status: g.status,
-});
-
-registerGroupAction('create', async (interaction, parsed) => {
-  if (!interaction.isModalSubmit()) return;
-  const [templateId = '', classId = ''] = parsed.id.split(':');
-  await submit(interaction, templateId, classId);
-});
 
 /** Explainer for the groups channel; its button starts the same flow as /lfg create (template, class, form). */
 export function buildLfgPanel() {
@@ -187,7 +65,7 @@ export function buildLfgPanel() {
       [
         'Starte deine eigene Gruppensuche in drei Schritten:',
         '1. Klicke unten auf **Gruppe erstellen** (oder nutze `/lfg create`).',
-        '2. Wähle eine Gruppenvorlage und deine Klasse.',
+        '2. Wähle Dungeon und Modus (oder „Andere Gruppe“ mit eigener Vorlage) und deine Klasse.',
         '3. Gib einen Titel, eine Beschreibung und optional eine Startzeit ein.',
         '',
         'Deine Gruppe wird in diesem Kanal gepostet. Andere treten mit **Beitreten** bei, und mit **Verwalten** bearbeitest du sie, entfernst Mitglieder oder schließt sie.',
@@ -200,16 +78,49 @@ export function buildLfgPanel() {
 
 const ephemeral = (content: string) => ({ content, flags: MessageFlags.Ephemeral }) as const;
 
+const OTHER_DUNGEON = 'other';
+const selectRow = (menu: StringSelectMenuBuilder) => new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu);
+
+/** Panel flow: dungeon, its mode, then class; "Andere Gruppe" goes through the template select instead of a mode. */
 registerGroupAction('start', async (interaction) => {
   if (!interaction.isButton() || !interaction.guild) return;
   if (!(await getGroupsChannel(interaction.guild))) return void (await interaction.reply(ephemeral(SETUP_REQUIRED_MESSAGE)));
-  const templates = createGroupTemplatesRepo(getDb()).listForGuild(interaction.guild.id).slice(0, SELECT_LIMIT);
-  if (templates.length === 0) return void (await interaction.reply(ephemeral('Es gibt noch keine Gruppenvorlagen.')));
   const menu = new StringSelectMenuBuilder()
-    .setCustomId(buildCustomId(GROUP_AREA, 'newtemplate'))
-    .setPlaceholder('Wähle eine Vorlage')
-    .addOptions(templates.map((t) => ({ label: t.name.slice(0, 100), value: String(t.id) })));
-  await interaction.reply({ ...ephemeral('Wähle eine Gruppenvorlage:'), components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)] });
+    .setCustomId(buildCustomId(GROUP_AREA, 'newdungeon'))
+    .setPlaceholder('Wähle einen Dungeon')
+    .addOptions([...DUNGEONS.map((d) => ({ label: d.name, value: d.id })), { label: 'Andere Gruppe', value: OTHER_DUNGEON, description: 'Eigener Titel und Gruppenvorlage' }]);
+  await interaction.reply({ ...ephemeral('Wähle einen Dungeon:'), components: [selectRow(menu)] });
+});
+
+registerGroupAction('newdungeon', async (interaction) => {
+  if (!interaction.isStringSelectMenu() || !interaction.guildId) return;
+  const choice = interaction.values[0] ?? '';
+  if (choice === OTHER_DUNGEON) {
+    const templates = createGroupTemplatesRepo(getDb()).listForGuild(interaction.guildId).slice(0, SELECT_LIMIT);
+    if (templates.length === 0) return void (await interaction.update({ content: 'Es gibt noch keine Gruppenvorlagen.', components: [] }));
+    const menu = new StringSelectMenuBuilder()
+      .setCustomId(buildCustomId(GROUP_AREA, 'newtemplate'))
+      .setPlaceholder('Wähle eine Vorlage')
+      .addOptions(templates.map((t) => ({ label: t.name.slice(0, 100), value: String(t.id) })));
+    return void (await interaction.update({ content: 'Wähle eine Gruppenvorlage:', components: [selectRow(menu)] }));
+  }
+  const dungeon = getDungeon(choice);
+  if (!dungeon) return void (await interaction.update({ content: 'Unbekannter Dungeon', components: [] }));
+  const menu = new StringSelectMenuBuilder()
+    .setCustomId(buildCustomId(GROUP_AREA, 'newmode', dungeon.id))
+    .setPlaceholder('Wähle den Modus')
+    .addOptions(dungeon.modes.map((m) => ({ label: m.label, value: m.id, ...(m.itemLevel === null ? {} : { description: formatItemLevel(m.itemLevel) }) })));
+  await interaction.update({ content: `**${dungeon.name}**: wähle den Modus:`, components: [selectRow(menu)] });
+});
+
+/** Dungeon groups use the built-in 5-player template, so the panel skips the template step for them. */
+registerGroupAction('newmode', async (interaction, parsed) => {
+  if (!interaction.isStringSelectMenu() || !interaction.guildId) return;
+  const template = createGroupTemplatesRepo(getDb()).findByName(interaction.guildId, PRESET_TEMPLATE_NAME);
+  if (!template) return void (await interaction.update({ content: `Die Vorlage „${PRESET_TEMPLATE_NAME}“ fehlt.`, components: [] }));
+  const presetId = `${parsed.id}.${interaction.values[0] ?? ''}`;
+  const { content, components } = buildClassPicker({ area: GROUP_AREA, action: 'newclass', id: `${template.id}:${presetId}` });
+  await interaction.update({ content, components });
 });
 
 registerGroupAction('newtemplate', async (interaction) => {
@@ -218,12 +129,15 @@ registerGroupAction('newtemplate', async (interaction) => {
   await interaction.update({ content, components });
 });
 
+/** The id is `<template id>`, or `<template id>:<preset id>` after a dungeon pick. */
 registerGroupAction('newclass', async (interaction, parsed) => {
   if (!interaction.isStringSelectMenu() || !interaction.guildId) return;
-  const classId = interaction.values[0] ?? '';
-  const prepared = prepare(interaction.guildId, interaction.user.id, parsed.id, classId);
-  if (!prepared.ok) return void (await interaction.update({ content: prepared.message, components: [] }));
-  await interaction.showModal(buildModal(parsed.id, classId));
+  const [templateId = '', presetId] = parsed.id.split(':');
+  const req = { kind: 'lfg', templateId, classId: interaction.values[0] ?? '', presetId } as const;
+  await closeVanishedBeforeModal(interaction.client, interaction.guildId, interaction.user.id, req);
+  const prepared = prepareCreate(interaction.guildId, interaction.user.id, req);
+  if (!prepared.ok) return void (await interaction.update(refusalReply(prepared)));
+  await interaction.showModal(buildCreateModal(interaction.guildId, req));
 });
 
 export const lfg: Command = {
@@ -232,35 +146,23 @@ export const lfg: Command = {
     const guild = interaction.guild;
     if (!guild) return reply(interaction, 'Dieser Befehl funktioniert nur auf einem Server.');
     switch (interaction.options.getSubcommand()) {
-      case 'list': {
-        const groups = createGroupsRepo(getDb())
-          .listByGuild(guild.id)
-          .filter((g) => g.status !== 'closed' && g.messageId);
-        if (groups.length === 0) return reply(interaction, 'Es gibt keine offenen Gruppen.');
-        const lines = groups.map((g) => {
-          const when = g.startsAt === null ? 'jetzt' : `<t:${g.startsAt}:f>`;
-          return `• [${g.title}](https://discord.com/channels/${g.guildId}/${g.channelId}/${g.messageId}) · ${GROUP_STATUS_LABEL[g.status]} · ${when}`;
-        });
-        return reply(interaction, lines.join('\n').slice(0, 2000));
-      }
+      case 'list':
+        return reply(interaction, formatPostList(guild.id, 'lfg') ?? 'Es gibt keine offenen Gruppen.');
       case 'create': {
         const channel = await getGroupsChannel(guild);
         if (!channel) return reply(interaction, SETUP_REQUIRED_MESSAGE);
-        const templateId = interaction.options.getString('template', true);
-        const classId = interaction.options.getString('class', true);
-        const prepared = prepare(guild.id, interaction.user.id, templateId, classId);
-        if (!prepared.ok) return reply(interaction, prepared.message);
-        return interaction.showModal(buildModal(templateId, classId));
+        const req = {
+          kind: 'lfg',
+          templateId: interaction.options.getString('template', true),
+          classId: interaction.options.getString('class', true),
+          presetId: interaction.options.getString('dungeon') ?? undefined,
+        } as const;
+        await closeVanishedBeforeModal(interaction.client, guild.id, interaction.user.id, req);
+        const prepared = prepareCreate(guild.id, interaction.user.id, req);
+        if (!prepared.ok) return interaction.reply({ ...refusalReply(prepared), flags: MessageFlags.Ephemeral });
+        return interaction.showModal(buildCreateModal(guild.id, req));
       }
     }
   },
-  async autocomplete(interaction: AutocompleteInteraction) {
-    if (!interaction.guildId) return interaction.respond([]);
-    const typed = interaction.options.getFocused().toLowerCase();
-    const choices = createGroupTemplatesRepo(getDb())
-      .listForGuild(interaction.guildId)
-      .filter((t) => t.name.toLowerCase().includes(typed))
-      .slice(0, AUTOCOMPLETE_LIMIT);
-    await interaction.respond(choices.map((t) => ({ name: t.name, value: String(t.id) })));
-  },
+  autocomplete: autocompleteCreateOptions,
 };

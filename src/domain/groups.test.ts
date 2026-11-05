@@ -8,6 +8,7 @@ import {
   buildGroupEmbed,
   buildSlotColumns,
   checkCreateGroup,
+  formatTimeChangeNotice,
   MAX_ACTIVE_GROUPS_PER_CREATOR,
   statusForFill,
   type GroupView,
@@ -27,7 +28,7 @@ describe('buildSlotColumns', () => {
     ]);
   });
   it('puts slots spanning several roles under Any', () => {
-    expect(buildSlotColumns([{ label: 'Chanter', allowed: ['chanter'] }], [])).toEqual([{ name: '🎵 Support (0/1)', lines: ['frei'] }]);
+    expect(buildSlotColumns([{ label: 'Chanter', allowed: ['chanter'] }], [])).toEqual([{ name: '⚔️ DPS (0/1)', lines: ['frei'] }]);
     expect(buildSlotColumns([{ label: 'Frontline', allowed: ['templar', 'gladiator', 'cleric'] }], [])[0]!.name).toBe('👤 Beliebig (0/1)');
   });
 });
@@ -51,10 +52,13 @@ describe('statusForFill', () => {
 
 describe('buildGroupEmbed', () => {
   const ZWSP = String.fromCharCode(0x200b);
-  const group: GroupView = { id: 1, creatorId: '1', title: 'Run', description: 'Go', startsAt: null, status: 'open', slots: dungeon };
+  const group: GroupView = { id: 1, creatorId: '1', title: 'Run', description: 'Go', startsAt: null, status: 'open', kind: 'lfg', slots: dungeon };
   it('says Now without a time and uses timestamps with one', () => {
     expect(buildGroupEmbed(group, []).fields[0].value).toBe('Jetzt');
     expect(buildGroupEmbed({ ...group, startsAt: 100 }, []).fields[0].value).toBe('<t:100:F> (<t:100:R>)');
+    expect(buildGroupEmbed({ ...group, startsAt: 100, durationSeconds: 7200, repeatDays: 7 }, []).fields[0].value).toBe(
+      '<t:100:F> (<t:100:R>)\nbis <t:7300:t>\n🔁 Jede Woche',
+    );
   });
   it('shows the role columns inline after a row break', () => {
     const fields = buildGroupEmbed(group, []).fields;
@@ -68,6 +72,21 @@ describe('buildGroupEmbed', () => {
   });
   it('leaves out an empty description', () => {
     expect(buildGroupEmbed({ ...group, description: '' }, [])).not.toHaveProperty('description');
+  });
+  it('names the creator of an event its organizer', () => {
+    expect(buildGroupEmbed(group, []).fields[1].name).toBe('Ersteller');
+    expect(buildGroupEmbed({ ...group, kind: 'event' }, []).fields[1].name).toBe('Organisator');
+  });
+});
+
+describe('formatTimeChangeNotice', () => {
+  it('mentions everyone and names the new time', () => {
+    expect(formatTimeChangeNotice(['1', '2'], 1900000000)).toBe('<@1> <@2> Zeit geändert auf <t:1900000000:F>');
+    expect(formatTimeChangeNotice([], 1900000000)).toBe('Zeit geändert auf <t:1900000000:F>');
+  });
+  it('stays within 2000 characters', () => {
+    const ids = Array.from({ length: 200 }, (_, i) => String(100000000000000000n + BigInt(i)));
+    expect(formatTimeChangeNotice(ids, 1900000000).length).toBeLessThanOrEqual(2000);
   });
 });
 
@@ -84,7 +103,7 @@ describe('checkCreateGroup', () => {
 
   it('lists fitting classes when the class fits no slot', () => {
     const r = checkCreateGroup([{ label: 'Tank', allowed: ['templar', 'gladiator'] }], 'cleric', 0);
-    expect(r).toEqual({ ok: false, message: 'Deine Klasse passt auf keinen Platz dieser Vorlage. Passende Klassen: Gladiator, Templar' });
+    expect(r).toEqual({ ok: false, message: 'Deine Klasse passt auf keinen Platz dieser Vorlage. Passende Klassen: Gladiator (Tank), Templar' });
   });
 
   it('refuses a 4th open group; closed groups do not count', () => {
@@ -98,7 +117,20 @@ describe('checkCreateGroup', () => {
     });
     repo.update(groups[0].id, { status: 'closed' });
     expect(checkCreateGroup(dungeon, 'templar', repo.countActiveByCreator('g', 'u')).ok).toBe(true);
+    repo.create({ ...base, kind: 'event' });
+    expect(repo.countActiveByCreator('g', 'u')).toBe(2);
     expect(repo.countActiveByCreator('other', 'u')).toBe(0);
+    expect(repo.listActiveByCreator('g', 'u').map((g) => g.id)).toEqual([groups[1].id, groups[2].id]);
+  });
+
+  it('finds open groups by the message ids of their posts', () => {
+    const repo = createGroupsRepo(db);
+    const base = { guildId: 'g', channelId: 'c', creatorId: 'u', title: 't', slotsJson: serializeSlots(dungeon) };
+    const a = repo.create({ ...base, messageId: 'm1' });
+    repo.create({ ...base, messageId: 'm2', status: 'closed' });
+    repo.create({ ...base, messageId: 'm3' });
+    expect(repo.listActiveByMessageIds(['m1', 'm2', 'x']).map((g) => g.id)).toEqual([a.id]);
+    expect(repo.listActiveByMessageIds([])).toEqual([]);
   });
 
   it('creates the group with its first member in one go and marks a 1-slot group full', () => {

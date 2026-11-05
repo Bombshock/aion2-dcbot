@@ -3,6 +3,8 @@ import { statusForFill } from '../domain/groups.js';
 import { assignSlot, parseSlotsJson } from '../domain/templates.js';
 
 export type GroupStatus = 'open' | 'full' | 'closed';
+/** `lfg`: posted by anyone in the groups channel, the creator plays in it. `event`: planned by organizers in the events channel. */
+export type GroupKind = 'lfg' | 'event';
 
 export interface GroupTemplate {
   id: number;
@@ -25,7 +27,14 @@ export interface GroupRecord {
   slotsJson: string;
   startsAt: number | null;
   status: GroupStatus;
+  kind: GroupKind;
   createdAt: number;
+  /** Unix time the reminder went out; null while it is still pending (or the group has no start time). */
+  remindedAt: number | null;
+  /** How long the event runs; it ends (and a repeating one is posted again) after that. null = the default expiry after start. */
+  durationSeconds: number | null;
+  /** Days until the next occurrence of a repeating event; null = no repeat. */
+  repeatDays: number | null;
 }
 
 export interface NewGroup {
@@ -39,11 +48,14 @@ export interface NewGroup {
   slotsJson: string;
   startsAt?: number | null;
   status?: GroupStatus;
+  kind?: GroupKind;
   createdAt?: number;
+  durationSeconds?: number | null;
+  repeatDays?: number | null;
 }
 
 export type GroupUpdate = Partial<
-  Pick<GroupRecord, 'channelId' | 'creatorId' | 'messageId' | 'templateId' | 'title' | 'description' | 'startsAt' | 'status'>
+  Pick<GroupRecord, 'channelId' | 'creatorId' | 'messageId' | 'templateId' | 'title' | 'description' | 'startsAt' | 'status' | 'remindedAt' | 'durationSeconds' | 'repeatDays'>
 >;
 
 export interface GroupMember {
@@ -73,7 +85,11 @@ interface GroupRow {
   slots_json: string;
   starts_at: number | null;
   status: GroupStatus;
+  kind: GroupKind;
   created_at: number;
+  reminded_at: number | null;
+  duration_seconds: number | null;
+  repeat_days: number | null;
 }
 
 interface MemberRow {
@@ -98,7 +114,11 @@ const toGroup = (r: GroupRow): GroupRecord => ({
   slotsJson: r.slots_json,
   startsAt: r.starts_at,
   status: r.status,
+  kind: r.kind,
   createdAt: r.created_at,
+  remindedAt: r.reminded_at,
+  durationSeconds: r.duration_seconds,
+  repeatDays: r.repeat_days,
 });
 
 const toMember = (r: MemberRow): GroupMember => ({
@@ -120,6 +140,9 @@ const COLUMNS: Record<keyof GroupUpdate, string> = {
   description: 'description',
   startsAt: 'starts_at',
   status: 'status',
+  remindedAt: 'reminded_at',
+  durationSeconds: 'duration_seconds',
+  repeatDays: 'repeat_days',
 };
 
 export function createGroupTemplatesRepo(db: Database.Database) {
@@ -183,8 +206,8 @@ export function createGroupsRepo(db: Database.Database) {
     create(g: NewGroup): GroupRecord {
       const info = db
         .prepare(
-          `INSERT INTO groups (guild_id, channel_id, message_id, creator_id, template_id, title, description, slots_json, starts_at, status, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO groups (guild_id, channel_id, message_id, creator_id, template_id, title, description, slots_json, starts_at, status, kind, created_at, duration_seconds, repeat_days)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           g.guildId,
@@ -197,7 +220,10 @@ export function createGroupsRepo(db: Database.Database) {
           g.slotsJson,
           g.startsAt ?? null,
           g.status ?? 'open',
+          g.kind ?? 'lfg',
           g.createdAt ?? nowSeconds(),
+          g.durationSeconds ?? null,
+          g.repeatDays ?? null,
         );
       return this.get(Number(info.lastInsertRowid))!;
     },
@@ -209,12 +235,27 @@ export function createGroupsRepo(db: Database.Database) {
         return group;
       })();
     },
-    /** Groups of the creator in the guild with status open or full. */
+    /** LFG groups of the creator in the guild with status open or full; events don't count. */
     countActiveByCreator(guildId: string, creatorId: string): number {
       const row = db
-        .prepare("SELECT COUNT(*) AS n FROM groups WHERE guild_id = ? AND creator_id = ? AND status IN ('open', 'full')")
+        .prepare("SELECT COUNT(*) AS n FROM groups WHERE guild_id = ? AND creator_id = ? AND kind = 'lfg' AND status IN ('open', 'full')")
         .get(guildId, creatorId) as { n: number };
       return row.n;
+    },
+    /** The groups countActiveByCreator counts. */
+    listActiveByCreator(guildId: string, creatorId: string): GroupRecord[] {
+      const rows = db
+        .prepare("SELECT * FROM groups WHERE guild_id = ? AND creator_id = ? AND kind = 'lfg' AND status IN ('open', 'full') ORDER BY id")
+        .all(guildId, creatorId) as GroupRow[];
+      return rows.map(toGroup);
+    },
+    /** Open or full groups whose post is one of the given messages. */
+    listActiveByMessageIds(messageIds: readonly string[]): GroupRecord[] {
+      if (messageIds.length === 0) return [];
+      const rows = db
+        .prepare(`SELECT * FROM groups WHERE status IN ('open', 'full') AND message_id IN (${messageIds.map(() => '?').join(', ')}) ORDER BY id`)
+        .all(...messageIds) as GroupRow[];
+      return rows.map(toGroup);
     },
     get(id: number): GroupRecord | undefined {
       const row = db.prepare('SELECT * FROM groups WHERE id = ?').get(id) as GroupRow | undefined;
@@ -226,14 +267,27 @@ export function createGroupsRepo(db: Database.Database) {
         : db.prepare('SELECT * FROM groups WHERE guild_id = ? ORDER BY id').all(guildId);
       return (rows as GroupRow[]).map(toGroup);
     },
-    /** Open or full groups past their expiry: `starts_at + afterStart`, or `created_at + afterCreate` without a start time. */
+    /**
+     * Open or full groups past their expiry: the end (`starts_at + duration`) when they have a duration, else `starts_at + afterStart`,
+     * or `created_at + afterCreate` without a start time.
+     */
     listExpired(now: number, afterStartSeconds: number, afterCreateSeconds: number): GroupRecord[] {
       const rows = db
         .prepare(
           `SELECT * FROM groups WHERE status IN ('open', 'full')
-           AND ((starts_at IS NOT NULL AND starts_at + ? <= ?) OR (starts_at IS NULL AND created_at + ? <= ?)) ORDER BY id`,
+           AND ((starts_at IS NOT NULL AND starts_at + COALESCE(duration_seconds, ?) <= ?) OR (starts_at IS NULL AND created_at + ? <= ?)) ORDER BY id`,
         )
         .all(afterStartSeconds, now, afterCreateSeconds, now) as GroupRow[];
+      return rows.map(toGroup);
+    },
+    /** Open or full groups not yet reminded that start within `leadSeconds` after `now` (and not at or before it). */
+    listDueForReminder(now: number, leadSeconds: number): GroupRecord[] {
+      const rows = db
+        .prepare(
+          `SELECT * FROM groups WHERE status IN ('open', 'full') AND reminded_at IS NULL AND starts_at IS NOT NULL
+           AND starts_at - ? <= ? AND ? < starts_at ORDER BY starts_at, id`,
+        )
+        .all(leadSeconds, now, now) as GroupRow[];
       return rows.map(toGroup);
     },
     update(id: number, patch: GroupUpdate): GroupRecord | undefined {
@@ -246,6 +300,33 @@ export function createGroupsRepo(db: Database.Database) {
     },
     delete(id: number): boolean {
       return db.prepare('DELETE FROM groups WHERE id = ?').run(id).changes > 0;
+    },
+    /**
+     * Closes a repeating event and creates its next occurrence at `startsAt`, in one transaction: same channel, organizer, slots,
+     * duration and repeat, but no members, no post yet and a pending reminder. Returns the closed and the new group.
+     */
+    rollOver(groupId: number, startsAt: number, now = nowSeconds()): { closed: GroupRecord; next: GroupRecord } | undefined {
+      return db.transaction(() => {
+        const group = this.get(groupId);
+        if (!group) return undefined;
+        const closed = this.update(groupId, { status: 'closed' })!;
+        const next = this.create({
+          guildId: group.guildId,
+          channelId: group.channelId,
+          creatorId: group.creatorId,
+          templateId: group.templateId,
+          title: group.title,
+          description: group.description,
+          slotsJson: group.slotsJson,
+          startsAt,
+          status: statusForFill(parseSlotsJson(group.slotsJson), []),
+          kind: group.kind,
+          createdAt: now,
+          durationSeconds: group.durationSeconds,
+          repeatDays: group.repeatDays,
+        });
+        return { closed, next };
+      })();
     },
 
     /** Throws a SqliteError (constraint) when the user is already a member or the slot is taken. */
@@ -321,7 +402,10 @@ export function createGroupsRepo(db: Database.Database) {
         return { ok: true, group: updated, members };
       })();
     },
-    /** Removes the member, hands the group to the earliest remaining member if the creator left, and closes it when empty. */
+    /**
+     * Removes the member. An LFG group goes to the earliest remaining member if the creator left and closes when empty;
+     * an event keeps its organizer and stays open.
+     */
     leaveMember(groupId: number, userId: string): LeaveResult {
       return db.transaction((): LeaveResult => {
         const group = this.get(groupId);
@@ -331,11 +415,11 @@ export function createGroupsRepo(db: Database.Database) {
         const members = this.listMembers(groupId);
         const patch: GroupUpdate = {};
         let newCreatorId: string | null = null;
-        if (members.length === 0) {
+        if (members.length === 0 && group.kind === 'lfg') {
           patch.status = 'closed';
         } else {
           patch.status = statusForFill(parseSlotsJson(group.slotsJson), members);
-          if (group.creatorId === userId) {
+          if (group.creatorId === userId && group.kind === 'lfg') {
             const earliest = [...members].sort((a, b) => a.joinedAt - b.joinedAt || a.slotIndex - b.slotIndex)[0]!;
             newCreatorId = earliest.userId;
             patch.creatorId = newCreatorId;
@@ -359,5 +443,5 @@ export type KickResult =
   | { ok: true; group: GroupRecord; members: GroupMember[] }
   | { ok: false; reason: 'not_found' | 'closed' | 'creator' | 'not_member' };
 
-export type GroupsRepo =ReturnType<typeof createGroupsRepo>;
+export type GroupsRepo = ReturnType<typeof createGroupsRepo>;
 export type GroupTemplatesRepo = ReturnType<typeof createGroupTemplatesRepo>;

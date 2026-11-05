@@ -23,6 +23,14 @@ export function buildCustomId(area: string, action: string, id: string | number 
   return `${area}:${action}:${id}`;
 }
 
+/**
+ * Removes the interaction's ephemeral reply once the post itself shows the change, so no confirmation is needed.
+ * Only for ephemeral replies: after deferUpdate on a public post this would delete the post.
+ */
+export async function dismissReply(interaction: ComponentInteraction): Promise<void> {
+  await interaction.deleteReply().catch((err) => console.error('Deleting ephemeral reply failed', err));
+}
+
 const handlers = new Map<string, InteractionHandler>();
 
 /** Register a handler for all customIds of an area. Handlers read their state from the DB by id. */

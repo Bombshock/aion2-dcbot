@@ -1,4 +1,4 @@
-import { CLASSES, getClass, MIXED_ROLE_EMOJI, ROLE_EMOJI, ROLES, UNKNOWN_ROLE_EMOJI, type Role } from './classes.js';
+import { CLASSES, classLabel, getClass, ROLE_EMOJI, ROLES, UNKNOWN_ROLE_EMOJI, type Role } from './classes.js';
 import { assignSlot, type Result, type TemplateSlot } from './templates.js';
 
 /** Open or full groups one creator may have at the same time in a guild. */
@@ -13,7 +13,10 @@ export interface GroupView {
   description: string;
   startsAt: number | null;
   status: GroupStatusView;
+  kind: 'lfg' | 'event';
   slots: TemplateSlot[];
+  durationSeconds?: number | null;
+  repeatDays?: number | null;
 }
 
 export interface GroupMemberView {
@@ -32,10 +35,11 @@ export interface GroupEmbedData {
 }
 
 const COLORS = { open: 0x57f287, full: 0x5865f2, closed: 0x99aab5 } as const;
+const MESSAGE_LIMIT = 2000;
 
 /** Names of the classes any slot of the template accepts, in catalog order. */
 export function fittingClasses(slots: readonly TemplateSlot[]): string[] {
-  return CLASSES.filter((c) => slots.some((s) => s.allowed.includes(c.id))).map((c) => c.name);
+  return CLASSES.filter((c) => slots.some((s) => s.allowed.includes(c.id))).map(classLabel);
 }
 
 /** Slot index the creator takes, or the message to show instead of creating the group. */
@@ -78,9 +82,9 @@ export interface SlotColumn {
   lines: string[];
 }
 
-/** Slots grouped by role (tanks, healers, DPS, support, then mixed "Any" slots), headed by icon, label and fill. */
+/** Slots grouped by role (tanks, healers, DPS, then mixed "Any" slots), headed by icon, label and fill. */
 export function buildSlotColumns(slots: readonly TemplateSlot[], members: readonly GroupMemberView[]): SlotColumn[] {
-  const columns = [...ROLES.map((r) => ({ role: r.role as Role | null, label: r.label, emoji: ROLE_EMOJI[r.role] })), { role: null, label: 'Beliebig', emoji: MIXED_ROLE_EMOJI }];
+  const columns = [...ROLES.map((r) => ({ role: r.role as Role | null, label: r.label, emoji: ROLE_EMOJI[r.role] })), { role: null, label: 'Beliebig', emoji: ROLE_EMOJI.any }];
   return columns.flatMap(({ role, label, emoji }) => {
     const taken = slots.map((slot, i) => ({ slot, member: members.find((m) => m.slotIndex === i) })).filter(({ slot }) => slotRole(slot) === role);
     if (taken.length === 0) return [];
@@ -96,15 +100,43 @@ export function buildFooter(slots: readonly TemplateSlot[], members: readonly Gr
   return status === 'full' ? `${total}/${total} · voll ✅` : `${members.length}/${total} · offen`;
 }
 
+/** Channel reply that tells the members about a new start time (mentions are capped to fit one message). */
+export function formatTimeChangeNotice(userIds: readonly string[], startsAt: number): string {
+  const text = `Zeit geändert auf <t:${startsAt}:F>`;
+  const mentions: string[] = [];
+  let length = text.length;
+  for (const id of userIds) {
+    const mention = `<@${id}>`;
+    if (length + 1 + mention.length > MESSAGE_LIMIT) break;
+    mentions.push(mention);
+    length += 1 + mention.length;
+  }
+  return mentions.length > 0 ? `${mentions.join(' ')} ${text}` : text;
+}
+
+/** `"Jede Woche"` for 7 days, `"Alle 3 Tage"` otherwise. */
+export function formatRepeat(days: number): string {
+  return days === 7 ? 'Jede Woche' : `Alle ${days} Tage`;
+}
+
+/** Start, then the end when the group has a duration, then the repeat on its own line. */
+function formatWhen(group: GroupView): string {
+  if (group.startsAt === null) return 'Jetzt';
+  const lines = [`<t:${group.startsAt}:F> (<t:${group.startsAt}:R>)`];
+  if (group.durationSeconds) lines.push(`bis <t:${group.startsAt + group.durationSeconds}:t>`);
+  if (group.repeatDays) lines.push(`🔁 ${formatRepeat(group.repeatDays)}`);
+  return lines.join('\n');
+}
+
 export function buildGroupEmbed(group: GroupView, members: readonly GroupMemberView[]): GroupEmbedData {
-  const when = group.startsAt === null ? 'Jetzt' : `<t:${group.startsAt}:F> (<t:${group.startsAt}:R>)`;
+  const when = formatWhen(group);
   return {
     title: group.title,
     ...(group.description ? { description: group.description } : {}),
     color: COLORS[group.status],
     fields: [
       { name: 'Wann', value: when, inline: true },
-      { name: 'Ersteller', value: `<@${group.creatorId}>`, inline: true },
+      { name: group.kind === 'event' ? 'Organisator' : 'Ersteller', value: `<@${group.creatorId}>`, inline: true },
       // Empty full-width field ends the row above, so the role columns start on a row of their own.
       { name: '\u200b', value: '\u200b' },
       ...buildSlotColumns(group.slots, members).map((c) => ({ name: c.name, value: c.lines.join('\n'), inline: true })),

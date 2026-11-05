@@ -4,13 +4,14 @@ import { createUserSettingsRepo } from '../db/userSettings.js';
 import type { Command } from './index.js';
 
 export const reminders: Command = {
+  public: true,
   data: new SlashCommandBuilder()
     .setName('reminders')
     .setDescription('Deine Erinnerungseinstellungen')
     .addSubcommand((sub) =>
       sub
         .setName('dm')
-        .setDescription('Eine DM vor Events bekommen, für die du angemeldet bist')
+        .setDescription('Eine DM vor Events und Gruppen bekommen, denen du beigetreten bist')
         .addBooleanOption((o) => o.setName('enabled').setDescription('DM-Erinnerungen senden').setRequired(true)),
     ),
   async execute(interaction: ChatInputCommandInteraction) {

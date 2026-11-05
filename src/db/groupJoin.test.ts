@@ -111,6 +111,15 @@ describe('leaveMember', () => {
     expect(repo.get(group.id)?.status).toBe('closed');
   });
 
+  it('keeps an event open with its organizer when members leave', () => {
+    const repo = createGroupsRepo(db);
+    const slots = template('Duo (2)').slots;
+    const event = repo.create({ guildId: 'g', channelId: 'c', creatorId: 'org', title: 't', slotsJson: serializeSlots(slots), kind: 'event', createdAt: 1 });
+    repo.joinMember(event.id, 'u1', 'templar');
+    expect(repo.leaveMember(event.id, 'u1')).toMatchObject({ ok: true, newCreatorId: null });
+    expect(repo.get(event.id)).toMatchObject({ status: 'open', creatorId: 'org' });
+  });
+
   it('reports non-members, closed and unknown groups', () => {
     const { repo, group } = newGroup('Duo (2)');
     expect(repo.leaveMember(group.id, 'x')).toEqual({ ok: false, reason: 'not_member' });

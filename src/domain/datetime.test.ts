@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { formatLocalDateTime, parseFutureDateTime, parseLocalDateTime } from './datetime.js';
+import {
+  addLocalDays,
+  formatDuration,
+  formatLocalDateTime,
+  nextOccurrenceStart,
+  parseDuration,
+  parseFutureDateTime,
+  parseLocalDateTime,
+} from './datetime.js';
 
 const secs = (iso: string) => Date.parse(iso) / 1000;
 
@@ -63,5 +71,44 @@ describe('formatLocalDateTime', () => {
       const parsed = parseLocalDateTime(input, zone);
       expect(parsed.ok && formatLocalDateTime(parsed.epochSeconds, zone)).toBe(input);
     }
+  });
+});
+
+describe('parseDuration', () => {
+  it('reads hours, minutes and clock notation', () => {
+    const cases: [string, number][] = [['2h', 7200], ['90m', 5400], ['1h30m', 5400], ['1h 30min', 5400], ['1:30', 5400], [' 45M ', 2700], ['24h', 86_400]];
+    for (const [input, seconds] of cases) expect(parseDuration(input)).toEqual({ ok: true, seconds });
+  });
+  it('rejects malformed, zero and too long durations', () => {
+    for (const s of ['', '2', 'zwei', '0h', '0m', '1:75', '2h30', 'h']) expect(parseDuration(s).ok).toBe(false);
+    expect(parseDuration('25h')).toEqual({ ok: false, message: 'Ein Event kann höchstens 24 Stunden dauern.' });
+  });
+  it('round-trips with formatDuration', () => {
+    for (const s of ['2h', '45m', '1h30m']) {
+      const parsed = parseDuration(s);
+      expect(parsed.ok && formatDuration(parsed.seconds)).toBe(s);
+    }
+  });
+});
+
+describe('addLocalDays', () => {
+  it('keeps the wall-clock time across a DST change', () => {
+    const r = parseLocalDateTime('24.10.2030 20:00', 'Europe/Berlin');
+    const next = r.ok ? addLocalDays(r.epochSeconds, 7, 'Europe/Berlin') : 0;
+    expect(formatLocalDateTime(next, 'Europe/Berlin')).toBe('31.10.2030 20:00');
+    expect(next - (r.ok ? r.epochSeconds : 0)).toBe(7 * 86_400 + 3600);
+  });
+  it('crosses month and year ends', () => {
+    expect(addLocalDays(secs('2030-12-28T20:00:00Z'), 7, 'UTC')).toBe(secs('2031-01-04T20:00:00Z'));
+  });
+});
+
+describe('nextOccurrenceStart', () => {
+  const start = secs('2030-01-01T20:00:00Z');
+  it('is one interval on when that lies in the future', () => {
+    expect(nextOccurrenceStart(start, 7, 'UTC', start + 3 * 3600)).toBe(secs('2030-01-08T20:00:00Z'));
+  });
+  it('skips occurrences missed while the bot was offline', () => {
+    expect(nextOccurrenceStart(start, 7, 'UTC', secs('2030-01-20T00:00:00Z'))).toBe(secs('2030-01-22T20:00:00Z'));
   });
 });
