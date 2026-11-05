@@ -46,8 +46,10 @@ registerGroupAction('manage', async (interaction, parsed) => {
   if (!interaction.isButton()) return;
   const found = await loadManagedGroup(interaction, parsed.id);
   if (!found) return;
-  const { group } = found;
+  const { repo, group } = found;
   const id = group.id;
+  // Kicking needs someone besides the creator; without anyone the button is left out.
+  const kickButton = repo.listMembers(id).some((m) => m.userId !== group.creatorId) ? [button('kick', 'Mitglied entfernen', ButtonStyle.Secondary, id)] : [];
   // Only events with a start time can repeat; the label says what clicking does.
   const repeatButton =
     group.kind === 'event' && group.startsAt !== null
@@ -59,7 +61,7 @@ registerGroupAction('manage', async (interaction, parsed) => {
     components: [
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         button('edit', 'Bearbeiten', ButtonStyle.Primary, id),
-        button('kick', 'Mitglied entfernen', ButtonStyle.Secondary, id),
+        ...kickButton,
         ...repeatButton,
         button('close', 'Gruppe schließen', ButtonStyle.Danger, id),
       ),
