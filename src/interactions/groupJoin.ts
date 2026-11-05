@@ -48,7 +48,7 @@ async function fetchGroupPost(client: Client, group: GroupRecord) {
   }
 }
 
-/** Deletes the channel reminders posted for the group and forgets them. Best effort: failures are logged, already deleted ones skipped. */
+/** Deletes the channel notifications posted for the group (reminders, announcements) and forgets them. Best effort: failures are logged, already deleted ones skipped. */
 async function deleteReminderMessages(client: Client, repo: GroupsRepo, group: GroupRecord): Promise<void> {
   if (group.reminderMessageIds.length === 0) return;
   repo.update(group.id, { reminderMessageIds: [] });
@@ -117,11 +117,14 @@ export async function closeGroup(client: Client, repo: GroupsRepo, groupId: numb
   return updated ? refreshGroupPost(client, repo, updated) : false;
 }
 
-/** Posts a plain message in the group's channel, pinging only the given users. Failures are logged, not thrown. */
-async function announce(client: Client, group: GroupRecord, content: string, users: string[]): Promise<void> {
+/**
+ * Posts a plain message in the group's channel, pinging only the given users, and remembers it so it is deleted once the
+ * group closes. Failures are logged, not thrown.
+ */
+async function announce(client: Client, repo: GroupsRepo, group: GroupRecord, content: string, users: string[]): Promise<void> {
   try {
     const channel = await client.channels.fetch(group.channelId);
-    if (channel?.isSendable()) await channel.send({ content, allowedMentions: { users } });
+    if (channel?.isSendable()) repo.addNotificationMessageIds(group.id, [(await channel.send({ content, allowedMentions: { users } })).id]);
   } catch (err) {
     console.error('Group announcement failed', err);
   }
@@ -174,7 +177,7 @@ registerGroupAction('pickclass', async (interaction, parsed) => {
 
   if (result.becameFull) {
     const ids = result.members.map((m) => m.userId);
-    await announce(interaction.client, group, `${ids.map((id) => `<@${id}>`).join(' ')} Die Gruppe ist bereit!`, ids);
+    await announce(interaction.client, repo, group, `${ids.map((id) => `<@${id}>`).join(' ')} Die Gruppe ist bereit!`, ids);
   }
 });
 
@@ -191,6 +194,6 @@ registerGroupAction('leave', async (interaction, parsed) => {
   const ok = await refreshGroupPost(interaction.client, repo, result.group);
   if (!ok) return void (await interaction.followUp(ephemeral(GROUP_GONE_MESSAGE)));
   if (result.newCreatorId) {
-    await announce(interaction.client, result.group, `<@${result.newCreatorId}> ist jetzt Ersteller dieser Gruppe.`, [result.newCreatorId]);
+    await announce(interaction.client, repo, result.group, `<@${result.newCreatorId}> ist jetzt Ersteller dieser Gruppe.`, [result.newCreatorId]);
   }
 });

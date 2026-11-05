@@ -2,8 +2,11 @@
 export const SCHEDULE = {
   tickSeconds: 60,
   reminderLeadSeconds: 30 * 60,
+  /** Default event duration. */
   groupExpiryAfterStartSeconds: 2 * 60 * 60,
   groupExpiryAfterCreateSeconds: 6 * 60 * 60,
+  /** LFG groups close (post and notifications deleted) this long after their target time, or after creation for "now". */
+  lfgExpiryAfterTargetSeconds: 60 * 60,
   /** Days between two occurrences of a repeating event. */
   eventRepeatDays: 7,
 } as const;

@@ -1,5 +1,5 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags, PermissionFlagsBits, StringSelectMenuBuilder, type Client } from 'discord.js';
-import { createGroupsRepo, type GroupRecord } from '../db/groups.js';
+import { createGroupsRepo, type GroupRecord, type GroupsRepo } from '../db/groups.js';
 import { getDb } from '../db/instance.js';
 import { formatClass } from '../domain/classes.js';
 import { formatDuration, formatLocalDateTime, parseDuration, parseFutureDateTime } from '../domain/datetime.js';
@@ -89,16 +89,17 @@ registerGroupAction('edit', async (interaction, parsed) => {
   );
 });
 
-/** Tells the members about a new start time in a reply to the post. Failures are logged, not fatal. */
-async function announceTimeChange(client: Client, group: GroupRecord, startsAt: number, userIds: string[]) {
+/** Tells the members about a new start time in a reply to the post, deleted once the group closes. Failures are logged, not fatal. */
+async function announceTimeChange(client: Client, repo: GroupsRepo, group: GroupRecord, startsAt: number, userIds: string[]) {
   try {
     const channel = await client.channels.fetch(group.channelId);
     if (!channel?.isSendable()) return;
-    await channel.send({
+    const notice = await channel.send({
       content: formatTimeChangeNotice(userIds, startsAt),
       allowedMentions: { users: userIds },
       reply: group.messageId ? { messageReference: group.messageId, failIfNotExists: false } : undefined,
     });
+    repo.addNotificationMessageIds(group.id, [notice.id]);
   } catch (err) {
     console.error('Announcing the time change failed', err);
   }
@@ -127,6 +128,9 @@ registerGroupAction('editsubmit', async (interaction, parsed) => {
     const parsedTime = unchanged ? ({ ok: true, epochSeconds: group.startsAt! } as const) : parseFutureDateTime(when, timezone, nowSeconds());
     if (!parsedTime.ok) return echo(parsedTime.message);
     startsAt = parsedTime.epochSeconds;
+  } else if (group.kind === 'lfg' && group.startsAt !== null) {
+    // "Empty = now": a cleared time becomes now, so the group doesn't fall back to its creation time and expire at once.
+    startsAt = nowSeconds();
   }
   let durationSeconds: number | undefined;
   if (group.kind === 'event') {
@@ -145,7 +149,7 @@ registerGroupAction('editsubmit', async (interaction, parsed) => {
   if (!ok) return void (await interaction.editReply({ content: GROUP_GONE_MESSAGE, components: [] }));
   if (startsAt !== null && startsAt !== group.startsAt) {
     const memberIds = repo.listMembers(group.id).map((m) => m.userId);
-    await announceTimeChange(interaction.client, updated, startsAt, memberIds);
+    await announceTimeChange(interaction.client, repo, updated, startsAt, memberIds);
   }
   await dismissReply(interaction);
 });

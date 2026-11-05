@@ -42,7 +42,7 @@ async function remindGroup(client: Client, db: Database.Database, group: GroupRe
       }
     } finally {
       // Remembered so the reminder is deleted once the event is over or rolled over to its next occurrence.
-      if (sent.length > 0) groups.update(group.id, { reminderMessageIds: sent });
+      groups.addNotificationMessageIds(group.id, sent);
     }
   } catch (err) {
     console.error(`Scheduler: reminder for group ${group.id} could not be posted`, err);
@@ -82,7 +82,7 @@ export async function runTick(client: Client, db: Database.Database, now: number
   const groups = createGroupsRepo(db);
 
   await each('reminder', groups.listDueForReminder(now, SCHEDULE.reminderLeadSeconds), (g) => remindGroup(client, db, g, now));
-  await each('group expiry', groups.listExpired(now, SCHEDULE.groupExpiryAfterStartSeconds, SCHEDULE.groupExpiryAfterCreateSeconds), async (group) => {
+  await each('group expiry', groups.listExpired(now, SCHEDULE.groupExpiryAfterStartSeconds, SCHEDULE.groupExpiryAfterCreateSeconds, SCHEDULE.lfgExpiryAfterTargetSeconds), async (group) => {
     if (group.kind === 'event' && group.repeatDays && group.startsAt !== null) await repostRepeatingEvent(client, db, groups, group, now);
     else await closeGroup(client, groups, group.id);
   });

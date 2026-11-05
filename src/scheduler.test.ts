@@ -51,27 +51,39 @@ describe('reminder query', () => {
 });
 
 describe('group expiry query', () => {
-  it('uses start time when set and creation time otherwise', () => {
+  it('closes LFG groups one hour after their target time, or after creation for "now"', () => {
     const repo = createGroupsRepo(db);
-    const base = { guildId: 'g', channelId: 'c', creatorId: 'u', title: 'G', slotsJson: '[]' };
+    const base = { guildId: 'g', channelId: 'c', creatorId: 'u', title: 'G', slotsJson: '[]', kind: 'lfg' as const };
+    const now = 100_000;
+    const timed = repo.create({ ...base, startsAt: now - 3600, createdAt: 1 });
+    repo.create({ ...base, startsAt: now - 3600 + 1, createdAt: 1 });
+    const instant = repo.create({ ...base, createdAt: now - 3600 });
+    repo.create({ ...base, createdAt: now - 3600 + 1 });
+    repo.create({ ...base, createdAt: 1, status: 'closed' });
+    expect(repo.listExpired(now, 2 * 3600, 6 * 3600, 3600).map((g) => g.id)).toEqual([timed.id, instant.id]);
+  });
+
+  it('uses start time when set and creation time otherwise for events', () => {
+    const repo = createGroupsRepo(db);
+    const base = { guildId: 'g', channelId: 'c', creatorId: 'u', title: 'G', slotsJson: '[]', kind: 'event' as const };
     const now = 100_000;
     const startedLong = repo.create({ ...base, startsAt: now - 2 * 3600, createdAt: now });
     repo.create({ ...base, startsAt: now - 2 * 3600 + 1, createdAt: 1 });
     const oldNoStart = repo.create({ ...base, createdAt: now - 6 * 3600 });
     repo.create({ ...base, createdAt: now - 6 * 3600 + 1 });
     const closed = repo.create({ ...base, createdAt: 1, status: 'closed' });
-    const ids = repo.listExpired(now, 2 * 3600, 6 * 3600).map((g) => g.id);
+    const ids = repo.listExpired(now, 2 * 3600, 6 * 3600, 3600).map((g) => g.id);
     expect(ids).toEqual([startedLong.id, oldNoStart.id]);
     expect(ids).not.toContain(closed.id);
   });
 
   it('ends groups with a duration at start + duration instead', () => {
     const repo = createGroupsRepo(db);
-    const base = { guildId: 'g', channelId: 'c', creatorId: 'u', title: 'G', slotsJson: '[]', createdAt: 1 };
+    const base = { guildId: 'g', channelId: 'c', creatorId: 'u', title: 'G', slotsJson: '[]', createdAt: 1, kind: 'event' as const };
     const now = 100_000;
     const short = repo.create({ ...base, startsAt: now - 1800, durationSeconds: 1800 });
     repo.create({ ...base, startsAt: now - 3 * 3600, durationSeconds: 4 * 3600 });
-    expect(repo.listExpired(now, 2 * 3600, 6 * 3600).map((g) => g.id)).toEqual([short.id]);
+    expect(repo.listExpired(now, 2 * 3600, 6 * 3600, 3600).map((g) => g.id)).toEqual([short.id]);
   });
 });
 

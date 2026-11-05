@@ -35,7 +35,7 @@ export interface GroupRecord {
   durationSeconds: number | null;
   /** Days until the next occurrence of a repeating event; null = no repeat. */
   repeatDays: number | null;
-  /** Channel messages of the start reminder, deleted once the group closes (ended, cancelled or rolled over). */
+  /** Channel notifications of the group (start reminder, "ready" and time-change pings, ...), deleted once it closes (ended, cancelled or rolled over). */
   reminderMessageIds: string[];
 }
 
@@ -273,16 +273,20 @@ export function createGroupsRepo(db: Database.Database) {
       return (rows as GroupRow[]).map(toGroup);
     },
     /**
-     * Open or full groups past their expiry: the end (`starts_at + duration`) when they have a duration, else `starts_at + afterStart`,
+     * Open or full groups past their expiry. LFG groups: `lfgAfterTargetSeconds` after their target time (`starts_at`, or
+     * `created_at` for "now"). Events: the end (`starts_at + duration`) when they have a duration, else `starts_at + afterStart`,
      * or `created_at + afterCreate` without a start time.
      */
-    listExpired(now: number, afterStartSeconds: number, afterCreateSeconds: number): GroupRecord[] {
+    listExpired(now: number, afterStartSeconds: number, afterCreateSeconds: number, lfgAfterTargetSeconds: number): GroupRecord[] {
       const rows = db
         .prepare(
-          `SELECT * FROM groups WHERE status IN ('open', 'full')
-           AND ((starts_at IS NOT NULL AND starts_at + COALESCE(duration_seconds, ?) <= ?) OR (starts_at IS NULL AND created_at + ? <= ?)) ORDER BY id`,
+          `SELECT * FROM groups WHERE status IN ('open', 'full') AND (
+             (kind = 'lfg' AND COALESCE(starts_at, created_at) + @lfg <= @now)
+             OR (kind <> 'lfg' AND ((starts_at IS NOT NULL AND starts_at + COALESCE(duration_seconds, @afterStart) <= @now)
+                                    OR (starts_at IS NULL AND created_at + @afterCreate <= @now)))
+           ) ORDER BY id`,
         )
-        .all(afterStartSeconds, now, afterCreateSeconds, now) as GroupRow[];
+        .all({ now, afterStart: afterStartSeconds, afterCreate: afterCreateSeconds, lfg: lfgAfterTargetSeconds }) as GroupRow[];
       return rows.map(toGroup);
     },
     /** Open or full groups not yet reminded that start within `leadSeconds` after `now` (and not at or before it). */
@@ -294,6 +298,14 @@ export function createGroupsRepo(db: Database.Database) {
         )
         .all(leadSeconds, now, now) as GroupRow[];
       return rows.map(toGroup);
+    },
+    /** Remembers more channel notifications of the group (reminders, announcements) so they are deleted once it closes. */
+    addNotificationMessageIds(id: number, messageIds: readonly string[]): void {
+      if (messageIds.length === 0) return;
+      db.transaction(() => {
+        const group = this.get(id);
+        if (group) this.update(id, { reminderMessageIds: [...group.reminderMessageIds, ...messageIds] });
+      })();
     },
     update(id: number, patch: GroupUpdate): GroupRecord | undefined {
       const keys = (Object.keys(patch) as (keyof GroupUpdate)[]).filter((k) => patch[k] !== undefined);
