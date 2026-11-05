@@ -16,6 +16,7 @@ const ADDED_COLUMNS: { table: string; column: string; definition: string }[] = [
   { table: 'groups', column: 'reminded_at', definition: 'INTEGER' },
   { table: 'groups', column: 'duration_seconds', definition: 'INTEGER' },
   { table: 'groups', column: 'repeat_days', definition: 'INTEGER' },
+  { table: 'groups', column: 'reminder_message_ids', definition: 'TEXT' },
 ];
 
 /**

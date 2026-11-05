@@ -35,8 +35,14 @@ async function remindGroup(client: Client, db: Database.Database, group: GroupRe
   try {
     const channel = await client.channels.fetch(group.channelId);
     if (!channel?.isSendable()) throw new Error('channel is not sendable');
-    for (const content of buildReminderMessages(header, userIds)) {
-      await channel.send({ content, allowedMentions: { users: userIds } });
+    const sent: string[] = [];
+    try {
+      for (const content of buildReminderMessages(header, userIds)) {
+        sent.push((await channel.send({ content, allowedMentions: { users: userIds } })).id);
+      }
+    } finally {
+      // Remembered so the reminder is deleted once the event is over or rolled over to its next occurrence.
+      if (sent.length > 0) groups.update(group.id, { reminderMessageIds: sent });
     }
   } catch (err) {
     console.error(`Scheduler: reminder for group ${group.id} could not be posted`, err);

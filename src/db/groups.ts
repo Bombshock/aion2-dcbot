@@ -35,6 +35,8 @@ export interface GroupRecord {
   durationSeconds: number | null;
   /** Days until the next occurrence of a repeating event; null = no repeat. */
   repeatDays: number | null;
+  /** Channel messages of the start reminder, deleted once the group closes (ended, cancelled or rolled over). */
+  reminderMessageIds: string[];
 }
 
 export interface NewGroup {
@@ -55,7 +57,7 @@ export interface NewGroup {
 }
 
 export type GroupUpdate = Partial<
-  Pick<GroupRecord, 'channelId' | 'creatorId' | 'messageId' | 'templateId' | 'title' | 'description' | 'startsAt' | 'status' | 'remindedAt' | 'durationSeconds' | 'repeatDays'>
+  Pick<GroupRecord, 'channelId' | 'creatorId' | 'messageId' | 'templateId' | 'title' | 'description' | 'startsAt' | 'status' | 'remindedAt' | 'durationSeconds' | 'repeatDays' | 'reminderMessageIds'>
 >;
 
 export interface GroupMember {
@@ -90,6 +92,7 @@ interface GroupRow {
   reminded_at: number | null;
   duration_seconds: number | null;
   repeat_days: number | null;
+  reminder_message_ids: string | null;
 }
 
 interface MemberRow {
@@ -119,6 +122,7 @@ const toGroup = (r: GroupRow): GroupRecord => ({
   remindedAt: r.reminded_at,
   durationSeconds: r.duration_seconds,
   repeatDays: r.repeat_days,
+  reminderMessageIds: r.reminder_message_ids ? (JSON.parse(r.reminder_message_ids) as string[]) : [],
 });
 
 const toMember = (r: MemberRow): GroupMember => ({
@@ -143,6 +147,7 @@ const COLUMNS: Record<keyof GroupUpdate, string> = {
   remindedAt: 'reminded_at',
   durationSeconds: 'duration_seconds',
   repeatDays: 'repeat_days',
+  reminderMessageIds: 'reminder_message_ids',
 };
 
 export function createGroupTemplatesRepo(db: Database.Database) {
@@ -294,7 +299,9 @@ export function createGroupsRepo(db: Database.Database) {
       const keys = (Object.keys(patch) as (keyof GroupUpdate)[]).filter((k) => patch[k] !== undefined);
       if (keys.length > 0) {
         const set = keys.map((k) => `${COLUMNS[k]} = @${k}`).join(', ');
-        db.prepare(`UPDATE groups SET ${set} WHERE id = @id`).run({ ...patch, id });
+        const { reminderMessageIds, ...rest } = patch;
+        const params = { ...rest, ...(reminderMessageIds ? { reminderMessageIds: reminderMessageIds.length ? JSON.stringify(reminderMessageIds) : null } : {}), id };
+        db.prepare(`UPDATE groups SET ${set} WHERE id = @id`).run(params);
       }
       return this.get(id);
     },

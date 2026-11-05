@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS groups (
   created_at  INTEGER NOT NULL,
   reminded_at INTEGER,
   duration_seconds INTEGER,
-  repeat_days INTEGER
+  repeat_days INTEGER,
+  reminder_message_ids TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_groups_guild_status ON groups (guild_id, status);
 

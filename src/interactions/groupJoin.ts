@@ -48,8 +48,30 @@ async function fetchGroupPost(client: Client, group: GroupRecord) {
   }
 }
 
-/** Re-renders the group post, or deletes it once the group is closed. Returns false (and closes the group) when the post is gone. */
+/** Deletes the channel reminders posted for the group and forgets them. Best effort: failures are logged, already deleted ones skipped. */
+async function deleteReminderMessages(client: Client, repo: GroupsRepo, group: GroupRecord): Promise<void> {
+  if (group.reminderMessageIds.length === 0) return;
+  repo.update(group.id, { reminderMessageIds: [] });
+  try {
+    const channel = await client.channels.fetch(group.channelId);
+    if (!channel?.isTextBased()) return;
+    for (const id of group.reminderMessageIds) {
+      await channel.messages.delete(id).catch((err) => {
+        if ((err as { code?: number }).code !== DISCORD_UNKNOWN_MESSAGE) throw err;
+      });
+    }
+  } catch (err) {
+    const code = (err as { code?: number }).code;
+    if (code !== DISCORD_UNKNOWN_CHANNEL) console.error(`Deleting the reminder of group ${group.id} failed`, err);
+  }
+}
+
+/**
+ * Re-renders the group post, or deletes it (and its start reminder) once the group is closed. Returns false (and closes the
+ * group) when the post is gone.
+ */
 export async function refreshGroupPost(client: Client, repo: GroupsRepo, group: GroupRecord): Promise<boolean> {
+  if (group.status === 'closed') await deleteReminderMessages(client, repo, group);
   const message = await fetchGroupPost(client, group);
   const view = { ...group, slots: parseSlotsJson(group.slotsJson) };
   const write = message && (group.status === 'closed' ? message.delete() : message.edit(renderGroupMessage(view, toMemberViews(repo.listMembers(group.id)))));
@@ -62,7 +84,8 @@ export async function refreshGroupPost(client: Client, repo: GroupsRepo, group: 
     },
   );
   if (edited) return true;
-  repo.update(group.id, { status: 'closed' });
+  const closed = repo.update(group.id, { status: 'closed' });
+  if (closed && group.status !== 'closed') await deleteReminderMessages(client, repo, closed);
   return false;
 }
 

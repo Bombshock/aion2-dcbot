@@ -34,6 +34,14 @@ describe('reminder query', () => {
     expect(repo.listDueForReminder(now, LEAD).map((g) => g.id)).toEqual([inside.id, lfg.id]);
   });
 
+  it('stores and clears the reminder message ids', () => {
+    const repo = createGroupsRepo(db);
+    const g = timed(5000);
+    expect(g.reminderMessageIds).toEqual([]);
+    expect(repo.update(g.id, { reminderMessageIds: ['r1', 'r2'] })!.reminderMessageIds).toEqual(['r1', 'r2']);
+    expect(repo.update(g.id, { reminderMessageIds: [] })!.reminderMessageIds).toEqual([]);
+  });
+
   it('can reset reminded_at to null', () => {
     const repo = createGroupsRepo(db);
     const g = timed(5000);
