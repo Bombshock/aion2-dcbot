@@ -39,23 +39,23 @@ For development, `npm run dev` restarts the bot on changes and `npm test` runs t
 This list is generated from the ticket board in [`tickets/`](tickets) by `npm run readme`, and a GitHub Action keeps it up to date on every push.
 
 <!-- roadmap:start -->
-### In review
+### Done
 
 - [x] Project scaffold
 - [x] Database schema and repositories
 - [x] Aion2 class catalog and class picker
 - [x] Admin setup command
 - [x] Create events
+- [x] Event sign up with class selection
+- [x] Manage events edit and cancel
+- [x] Create group search posts
+- [x] Join and leave groups
+- [x] Manage groups
+- [x] Reminders and auto cleanup
+- [x] Group templates
 
 ### Planned
 
-- [ ] Event sign up with class selection
-- [ ] Manage events edit and cancel
-- [ ] Group templates
-- [ ] Create group search posts
-- [ ] Join and leave groups
-- [ ] Manage groups
-- [ ] Reminders and auto cleanup
 - [ ] Group threads
 - [ ] Readme and deployment
 <!-- roadmap:end -->
