@@ -2,7 +2,7 @@ import { MessageFlags, PermissionFlagsBits, SlashCommandBuilder, type ChatInputC
 import type { Command } from './index.js';
 import { createGroupsRepo, type GroupKind, type GroupRecord, type GroupsRepo } from '../db/groups.js';
 import { getDb } from '../db/instance.js';
-import { isLeftover, postGroupId, type BotMessageView, type CleanupGroupInfo, type CleanupLookup } from '../domain/cleanup.js';
+import { isLeftover, notificationPostId, type BotMessageView, type CleanupGroupInfo, type CleanupLookup } from '../domain/cleanup.js';
 import { closeVanishedGroups, refreshGroupPost } from '../interactions/groupJoin.js';
 import { getGuildSettings } from '../settings.js';
 
@@ -20,13 +20,13 @@ const data = new SlashCommandBuilder()
   .addSubcommand((s) =>
     s
       .setName('events')
-      .setDescription('Beendete Events und ihre Start-Erinnerungen aufräumen')
+      .setDescription('Beendete Events samt Erinnerungen und Benachrichtigungen aufräumen')
       .addBooleanOption(allOption('Auch laufende und wiederkehrende Events löschen (Standard: nein)')),
   )
   .addSubcommand((s) =>
     s
       .setName('lfg')
-      .setDescription('Geschlossene Gruppensuchen und ihre Start-Erinnerungen aufräumen')
+      .setDescription('Geschlossene Gruppensuchen samt Erinnerungen und Benachrichtigungen aufräumen')
       .addBooleanOption(allOption('Auch offene Gruppensuchen löschen (Standard: nein)')),
   );
 
@@ -38,7 +38,7 @@ const toView = (message: Message): BotMessageView => {
       if (component.customId) customIds.push(component.customId);
     }
   }
-  return { id: message.id, content: message.content, customIds };
+  return { id: message.id, content: message.content, customIds, referenceId: message.reference?.messageId ?? null };
 };
 
 /** Deletes the group's post and tracked reminders (best effort), then its DB row and members. */
@@ -64,7 +64,7 @@ function buildLookup(repo: GroupsRepo, guildId: string): CleanupLookup {
   return { group: (id) => byId.get(id), groupOfPost: (id) => byPost.get(id), keep };
 }
 
-/** Deletes the bot's leftover posts and reminders of the kind among the channel's latest messages. */
+/** Deletes the bot's leftover posts and notifications of the kind among the channel's latest messages. */
 async function sweepChannel(client: Client, channelId: string, kind: GroupKind, lookup: CleanupLookup): Promise<{ posts: number; reminders: number; failed: boolean }> {
   const result = { posts: 0, reminders: 0, failed: false };
   const botId = client.user?.id;
@@ -83,7 +83,7 @@ async function sweepChannel(client: Client, channelId: string, kind: GroupKind, 
           () => true,
           (err) => (console.error(`Cleanup: deleting message ${message.id} failed`, err), (result.failed = true), false),
         );
-        if (deleted) postGroupId(view) === null ? result.reminders++ : result.posts++;
+        if (deleted) notificationPostId(view) !== null ? result.reminders++ : result.posts++;
       }
       before = page.last()?.id;
       if (page.size < PAGE_SIZE) break;
@@ -124,8 +124,8 @@ async function cleanup(i: ChatInputCommandInteraction, guild: Guild, kind: Group
   const label = kind === 'event' ? 'Events' : 'Gruppensuchen';
   const lines = [
     `**${label} aufgeräumt.**`,
-    `• ${targets.length} ${all ? '' : 'beendete '}${label} aus der Datenbank entfernt (samt Posts und Erinnerungen)`,
-    `• ${posts} übrig gebliebene Posts und ${reminders} Start-Erinnerungen in ${channelIds.size} Kanal/Kanälen gelöscht (je Kanal die letzten ${SCAN_LIMIT} Nachrichten)`,
+    `• ${targets.length} ${all ? '' : 'beendete '}${label} aus der Datenbank entfernt (samt Posts, Erinnerungen und Benachrichtigungen)`,
+    `• ${posts} übrig gebliebene Posts und ${reminders} Erinnerungen/Benachrichtigungen in ${channelIds.size} Kanal/Kanälen gelöscht (je Kanal die letzten ${SCAN_LIMIT} Nachrichten)`,
   ];
   if (failed) lines.push('Manche Nachrichten konnte ich nicht lesen oder löschen. Prüfe meine Berechtigung „Nachrichtenverlauf lesen“ in den Kanälen.');
   return i.editReply(lines.join('\n'));

@@ -19,8 +19,9 @@ client.once(Events.ClientReady, async (c) => {
   startScheduler(c, getDb());
 });
 
-client.on(Events.MessageDelete, (message) => closeGroupsOfDeletedPosts([message.id]));
-client.on(Events.MessageBulkDelete, (messages) => closeGroupsOfDeletedPosts([...messages.keys()]));
+const onPostsDeleted = (messageIds: string[]) => closeGroupsOfDeletedPosts(client, messageIds).catch((err) => console.error('Closing groups of deleted posts failed', err));
+client.on(Events.MessageDelete, (message) => void onPostsDeleted([message.id]));
+client.on(Events.MessageBulkDelete, (messages) => void onPostsDeleted([...messages.keys()]));
 
 client.on(Events.InteractionCreate, async (interaction) => {
   try {

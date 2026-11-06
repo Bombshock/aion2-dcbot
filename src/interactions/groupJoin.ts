@@ -90,8 +90,8 @@ export async function refreshGroupPost(client: Client, repo: GroupsRepo, group: 
 }
 
 /**
- * Closes the given groups whose post was deleted, e.g. by a moderator while the bot was offline.
- * A post that can't be checked counts as still there.
+ * Closes the given groups whose post was deleted, e.g. by a moderator while the bot was offline, and deletes their
+ * notifications. A post that can't be checked counts as still there.
  */
 export async function closeVanishedGroups(client: Client, repo: GroupsRepo, groups: readonly GroupRecord[]): Promise<void> {
   await Promise.all(
@@ -100,15 +100,19 @@ export async function closeVanishedGroups(client: Client, repo: GroupsRepo, grou
         (message) => message === null,
         (err) => (console.error('Checking group post failed', err), false),
       );
-      if (gone) repo.update(group.id, { status: 'closed' });
+      const closed = gone && repo.update(group.id, { status: 'closed' });
+      if (closed) await deleteReminderMessages(client, repo, closed);
     }),
   );
 }
 
-/** Closes the groups whose post was among the deleted messages. */
-export function closeGroupsOfDeletedPosts(messageIds: readonly string[]): void {
+/** Closes the groups whose post was among the deleted messages and deletes their notifications. */
+export async function closeGroupsOfDeletedPosts(client: Client, messageIds: readonly string[]): Promise<void> {
   const repo = createGroupsRepo(getDb());
-  for (const group of repo.listActiveByMessageIds(messageIds)) repo.update(group.id, { status: 'closed' });
+  for (const group of repo.listActiveByMessageIds(messageIds)) {
+    const closed = repo.update(group.id, { status: 'closed' });
+    if (closed) await deleteReminderMessages(client, repo, closed);
+  }
 }
 
 /** Closes the group and deletes its post; the one place to hook thread archiving into later. Returns false when the post is gone. */
@@ -118,13 +122,15 @@ export async function closeGroup(client: Client, repo: GroupsRepo, groupId: numb
 }
 
 /**
- * Posts a plain message in the group's channel, pinging only the given users, and remembers it so it is deleted once the
- * group closes. Failures are logged, not thrown.
+ * Posts a plain message in the group's channel as a reply to the group post, pinging only the given users, and remembers it
+ * so it is deleted once the group closes. The reply also lets /cleanup tie it to its group. Failures are logged, not thrown.
  */
 async function announce(client: Client, repo: GroupsRepo, group: GroupRecord, content: string, users: string[]): Promise<void> {
   try {
     const channel = await client.channels.fetch(group.channelId);
-    if (channel?.isSendable()) repo.addNotificationMessageIds(group.id, [(await channel.send({ content, allowedMentions: { users } })).id]);
+    if (!channel?.isSendable()) return;
+    const reply = group.messageId ? { messageReference: group.messageId, failIfNotExists: false } : undefined;
+    repo.addNotificationMessageIds(group.id, [(await channel.send({ content, allowedMentions: { users }, reply })).id]);
   } catch (err) {
     console.error('Group announcement failed', err);
   }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isLeftover, postGroupId, reminderPostId, type CleanupGroupInfo, type CleanupLookup } from './cleanup.js';
+import { isLeftover, postGroupId, notificationPostId, type CleanupGroupInfo, type CleanupLookup } from './cleanup.js';
 
 const post = (id: string, groupId: number) => ({ id, content: '', customIds: [`grp:join:${groupId}`, `grp:leave:${groupId}`, `grp:manage:${groupId}`] });
 const reminder = (id: string, postId: string) => ({ id, content: `⏰ **Raid** beginnt <t:1:R> — https://discord.com/channels/1/2/${postId}\n<@1>`, customIds: [] });
@@ -16,8 +16,11 @@ describe('message classification', () => {
   it('reads the group id of a post and the post id of a reminder', () => {
     expect(postGroupId(post('m', 7))).toBe(7);
     expect(postGroupId({ id: 'm', content: '', customIds: ['grp:start:'] })).toBeNull();
-    expect(reminderPostId(reminder('r', '99'))).toBe('99');
-    expect(reminderPostId({ id: 'a', content: '<@1> ist beigetreten', customIds: [] })).toBeNull();
+    expect(notificationPostId(reminder('r', '99'))).toBe('99');
+    expect(notificationPostId({ id: 'a', content: 'hallo', customIds: [] })).toBeNull();
+    expect(notificationPostId({ id: 'a', content: '<@1> Die Gruppe ist bereit!', customIds: [], referenceId: '55' })).toBe('55');
+    expect(notificationPostId({ id: 'a', content: '<@1> <@2> Die Gruppe ist bereit!', customIds: [] })).toBe('');
+    expect(notificationPostId({ id: 'a', content: '<@1> <@2> ist als Kleriker (Heiler) beigetreten.', customIds: [] })).toBe('');
   });
 });
 
@@ -50,8 +53,17 @@ describe('isLeftover', () => {
     expect(isLeftover(reminder('rx', '999'), 'lfg', l)).toBe(true);
   });
 
-  it('never touches the LFG panel or announcements', () => {
+  it('never touches the LFG panel or unrelated messages', () => {
     expect(isLeftover({ id: 'panel', content: '', customIds: ['grp:start:'] }, 'lfg', l)).toBe(false);
-    expect(isLeftover({ id: 'a', content: '<@1> Die Gruppe ist bereit!', customIds: [] }, 'lfg', l)).toBe(false);
+    expect(isLeftover({ id: 'x', content: 'Willkommen!', customIds: [] }, 'lfg', l)).toBe(false);
+  });
+
+  it('treats announcements like reminders', () => {
+    const ready = (id: string, referenceId?: string) => ({ id, content: '<@1> Die Gruppe ist bereit!', customIds: [], referenceId });
+    expect(isLeftover(ready('a1', '102'), 'lfg', l)).toBe(false);
+    expect(isLeftover(ready('a3', '103'), 'event', l)).toBe(true);
+    expect(isLeftover(ready('a3', '103'), 'lfg', l)).toBe(false);
+    expect(isLeftover(ready('legacy'), 'lfg', l)).toBe(true);
+    expect(isLeftover(ready('kept'), 'lfg', lookup(groups, ['kept']))).toBe(false);
   });
 });

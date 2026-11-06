@@ -5,6 +5,8 @@ export interface BotMessageView {
   id: string;
   content: string;
   customIds: readonly string[];
+  /** The message this one replies to, if any. Notifications reply to their group's post. */
+  referenceId?: string | null;
 }
 
 export interface CleanupGroupInfo {
@@ -19,7 +21,7 @@ export interface CleanupLookup {
   group(groupId: number): CleanupGroupInfo | undefined;
   /** The group whose post is this message, or undefined. */
   groupOfPost(messageId: string): CleanupGroupInfo | undefined;
-  /** Message ids of the current posts and tracked reminders of active groups; never deleted. */
+  /** Message ids of the current posts and tracked notifications of active groups; never deleted. */
   keep: ReadonlySet<string>;
 }
 
@@ -36,17 +38,28 @@ export function postGroupId(message: BotMessageView): number | null {
   return null;
 }
 
-/** The post message id a start reminder links to, or null when the message is no reminder. Reminders without a link return ''. */
-export function reminderPostId(message: BotMessageView): string | null {
-  if (message.customIds.length > 0 || !message.content.startsWith('⏰ **')) return null;
+/**
+ * Texts of the bot's channel notifications (start reminders, ready and handover pings, time changes, and the join pings of
+ * older versions). Lets the cleanup recognise notifications that neither reply to nor link their group's post.
+ */
+const NOTIFICATION_TEXT = [/^⏰ \*\*/, /Die Gruppe ist bereit!$/, /ist jetzt Ersteller dieser Gruppe\.$/, /ist als .+ beigetreten\.$/, /^Zeit geändert auf <t:\d+:F>/];
+
+/**
+ * The post message id a notification belongs to (the post it replies to, or the post a start reminder links to), or null
+ * when the message is no notification. Notifications that can't be tied to a post return ''.
+ */
+export function notificationPostId(message: BotMessageView): string | null {
+  if (message.customIds.length > 0) return null;
+  if (message.referenceId) return message.referenceId;
+  if (!NOTIFICATION_TEXT.some((re) => re.test(message.content))) return null;
   return REMINDER_LINK.exec(message.content)?.[1] ?? '';
 }
 
 /**
  * Whether a message of the bot is a leftover of the given kind: a group post that isn't the current post of an active
- * group, or a start reminder of a group that is closed or gone. Anything of the other kind, the LFG panel and
- * announcements are never leftovers. A leftover whose group is gone from the DB can't tell its kind; it is garbage
- * either way, so it counts.
+ * group, or a notification (reminder, announcement) of a group that is closed or gone. Anything of the other kind and the
+ * LFG panel are never leftovers. A leftover whose group is gone from the DB can't tell its kind; it is garbage either way,
+ * so it counts.
  */
 export function isLeftover(message: BotMessageView, kind: CleanupKind, lookup: CleanupLookup): boolean {
   if (lookup.keep.has(message.id)) return false;
@@ -55,7 +68,7 @@ export function isLeftover(message: BotMessageView, kind: CleanupKind, lookup: C
     const owner = lookup.group(groupId);
     return owner === undefined || owner.kind === kind;
   }
-  const postId = reminderPostId(message);
+  const postId = notificationPostId(message);
   if (postId === null) return false;
   const owner = postId ? lookup.groupOfPost(postId) : undefined;
   return owner === undefined || (owner.kind === kind && !owner.active);
